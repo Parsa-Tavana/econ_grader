@@ -1,0 +1,124 @@
+"""QwenVisionGrader — self-hosted Qwen3-VL via OpenAI-compatible vLLM endpoint."""
+from __future__ import annotations
+
+import base64
+import json
+import logging
+import time
+from typing import Any
+
+import httpx
+from .base import IVisionGrader, GradingResult, CriterionScore
+from ..prompts.loader import load_prompt
+from ..config import settings
+
+logger = logging.getLogger(__name__)
+
+SYSTEM_PROMPT = (
+    "You are a careful exam grader. Respond with JSON only. "
+    "No markdown fences, no explanation outside JSON."
+)
+
+
+class QwenVisionGrader(IVisionGrader):
+    """Calls a self-hosted vLLM/OpenAI-compatible endpoint at QWEN_BASE_URL."""
+
+    def grade(
+        self,
+        *,
+        question_text: str,
+        question_images: list[bytes],
+        rubric: dict[str, Any],
+        answer_images: list[bytes],
+        max_score: float,
+        temperature: float,
+        prompt_version: str,
+    ) -> GradingResult:
+        start_ms = time.time()
+        prompt_text = load_prompt(prompt_version)
+
+        content: list[dict[str, Any]] = []
+        for img in question_images:
+            content.append({"type": "image_url", "image_url": {
+                "url": f"data:image/png;base64,{base64.b64encode(img).decode()}"
+            }})
+        for img in answer_images:
+            content.append({"type": "image_url", "image_url": {
+                "url": f"data:image/png;base64,{base64.b64encode(img).decode()}"
+            }})
+        content.append({"type": "text", "text": prompt_text.format(
+            question_text=question_text,
+            rubric_json=json.dumps(rubric, indent=2),
+            max_score=max_score,
+        )})
+
+        try:
+            resp = httpx.post(
+                f"{settings.QWEN_BASE_URL.rstrip('/')}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.QWEN_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": settings.MODEL_NAME,
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": content},
+                    ],
+                    "temperature": temperature,
+                    "max_tokens": settings.DEFAULT_MAX_TOKENS,
+                },
+                timeout=120.0,
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            raw_text: str = body["choices"][0]["message"]["content"]
+            latency_ms = int((time.time() - start_ms) * 1000)
+            parsed = self._parse_response(raw_text)
+            usage = body.get("usage", {})
+            return GradingResult(
+                provider="qwen",
+                model_name=settings.MODEL_NAME,
+                model_version=None,
+                prompt_version=prompt_version,
+                temperature=temperature,
+                ai_score=parsed.get("score", 0.0),
+                reasoning=parsed.get("reasoning", ""),
+                criteria_scores=[
+                    CriterionScore(
+                        criterion_id=c["id"],
+                        score=float(c.get("score", 0)),
+                        max_score=float(c.get("max_score", 0)),
+                        comment=c.get("comment"),
+                    )
+                    for c in parsed.get("criteria_scores", [])
+                    if isinstance(c, dict)
+                ],
+                confidence=parsed.get("confidence"),
+                flagged_ambiguities=parsed.get("flagged_ambiguities", []),
+                raw_response=raw_text,
+                input_tokens=usage.get("prompt_tokens", 0),
+                output_tokens=usage.get("completion_tokens", 0),
+                latency_ms=latency_ms,
+            )
+        except Exception as exc:
+            logger.exception("Qwen grading failed")
+            return GradingResult(
+                provider="qwen", model_name=settings.MODEL_NAME, model_version=None,
+                prompt_version=prompt_version, temperature=temperature, ai_score=0.0,
+                reasoning="", raw_response="", latency_ms=int((time.time() - start_ms) * 1000),
+                error=f"Qwen API failure: {exc}",
+            )
+
+    @staticmethod
+    def _parse_response(raw_text: str) -> dict[str, Any]:
+        cleaned = raw_text.strip()
+        if cleaned.startswith("```"):
+            cleaned = "\n".join(cleaned.splitlines()[1:-1]).strip()
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            start = cleaned.find("{"); end = cleaned.rfind("}")
+            if start >= 0 and end > start:
+                return json.loads(cleaned[start:end + 1])
+            raise

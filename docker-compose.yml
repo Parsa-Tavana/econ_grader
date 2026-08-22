@@ -1,0 +1,76 @@
+version: "3.9"
+
+services:
+  db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: econgrader-db
+    environment:
+      ACCEPT_EULA: "Y"
+      SA_PASSWORD: "YourStrong@Passw0rd"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - sql_data:/var/opt/mssql
+    healthcheck:
+      test: [ "CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'YourStrong@Passw0rd' -Q 'SELECT 1' || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  grading:
+    build:
+      context: .
+      dockerfile: Dockerfile.grading
+    container_name: econgrader-grading
+    environment:
+      - MODEL_PROVIDER=claude
+      - MODEL_NAME=claude-3-5-sonnet-20241022
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - QWEN_BASE_URL=http://localhost:8000/v1
+      - QWEN_API_KEY=not-needed
+      - DEFAULT_TEMPERATURE=0.0
+      - DEFAULT_MAX_TOKENS=2048
+      - IMAGE_STORAGE_ROOT=/srv/storage/images
+      - PROMPTS_DIR=/srv/app/prompts
+      - LOG_LEVEL=INFO
+    volumes:
+      - grading_storage:/srv/storage
+    ports:
+      - "5001:5001"
+    depends_on:
+      - db
+    healthcheck:
+      test: [ "CMD", "curl", "-fsS", "http://localhost:5001/health" ]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: econgrader-api
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__DefaultConnection=Server=db,1433;Database=EconGrader;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=True;Encrypt=False
+      - GradingService__BaseUrl=http://grading:5001
+      - FileStorage__RootPath=/app/storage/images
+      - Serilog__MinimumLevel__Default=Information
+    volumes:
+      - api_storage:/app/storage
+      - api_logs:/app/logs
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      grading:
+        condition: service_healthy
+
+volumes:
+  sql_data:
+  grading_storage:
+  api_storage:
+  api_logs:

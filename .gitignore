@@ -1,0 +1,64 @@
+# ===== .NET =====
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+artifacts/
+TestResults/
+[Ll]ogs/
+
+# ===== Python / FastAPI service =====
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+htmlcov/
+.coverage
+.coverage.*
+
+# ===== Environment variables & secrets (NEVER commit real keys) =====
+.env
+.env.*
+!.env.example
+
+# ===== Runtime application data =====
+# uploaded exam answer images (created by LocalFileStorage at runtime)
+storage/
+# Serilog output
+logs/
+*.log
+
+# ===== Node (future frontend) =====
+node_modules/
+dist/
+.vite/
+
+# ===== IDE =====
+.idea/
+*.swp
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# ===== OS junk =====
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+# MS Office temp/lock files (~$ummary.docx etc.)
+~$*
+
+# ===== Docker runtime leftovers =====
+docker-compose.override.yml

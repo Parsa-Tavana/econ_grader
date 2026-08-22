@@ -1,0 +1,29 @@
+# ── .NET API (EconGrader.Web) ────────────────────────────────────────────────
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+WORKDIR /src
+
+COPY ["src/EconGrader.Domain/EconGrader.Domain.csproj", "EconGrader.Domain/"]
+COPY ["src/EconGrader.Application/EconGrader.Application.csproj", "EconGrader.Application/"]
+COPY ["src/EconGrader.Infrastructure/EconGrader.Infrastructure.csproj", "EconGrader.Infrastructure/"]
+COPY ["src/EconGrader.Web/EconGrader.Web.csproj", "EconGrader.Web/"]
+RUN dotnet restore "EconGrader.Web/EconGrader.Web.csproj"
+
+COPY src/ .
+RUN dotnet publish "EconGrader.Web/EconGrader.Web.csproj" -c Release -o /app/publish --no-restore
+
+# ── Runtime ──────────────────────────────────────────────────────────────────
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS final
+WORKDIR /app
+
+# Non-root user
+RUN adduser --disabled-password --gecos "" appuser && chown -R appuser /app
+USER appuser
+
+COPY --from=build /app/publish .
+
+ENV ASPNETCORE_URLS=http://+:8080 \
+    DOTNET_EnableDiagnostics=0
+
+EXPOSE 8080
+
+ENTRYPOINT ["dotnet", "EconGrader.Web.dll"]

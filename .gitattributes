@@ -1,0 +1,28 @@
+# Normalize line endings: LF in repo everywhere (Docker builds run on Linux)
+* text=auto eol=lf
+
+# Explicit text types
+*.cs text diff=csharp
+*.py text
+*.json text
+*.md text
+*.yml text
+*.yaml text
+*.txt text
+*.sh text
+*.csproj text
+*.sln text
+Dockerfile* text
+.gitignore text
+
+# Windows scripts need CRLF
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary — never touch
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary
+*.docx binary
+*.ico binary

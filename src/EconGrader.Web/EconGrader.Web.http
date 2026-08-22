@@ -1,0 +1,6 @@
+@EconGrader.Web_HostAddress = http://localhost:5197
+
+GET {{EconGrader.Web_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
