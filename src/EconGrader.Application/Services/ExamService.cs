@@ -1,4 +1,5 @@
 using EconGrader.Application.DTOs;
+using EconGrader.Application.Exceptions;
 using EconGrader.Domain.Entities;
 
 namespace EconGrader.Application.Services;
@@ -42,7 +43,7 @@ public sealed class ExamService : IExamService
         _db.Exams.Add(exam);
         await _db.SaveChangesAsync(ct);
         await _audit.WriteAsync("ExamCreated", "Exam", exam.Id, createdByUserId, new { exam.Name, exam.Year });
-        return await GetAsync(exam.Id, ct) ?? throw new InvalidOperationException("Failed to load created exam");
+        return await GetAsync(exam.Id, ct) ?? throw new NotFoundException(nameof(Exam), exam.Id);
     }
 
     public async Task<ExamDto?> UpdateAsync(Guid id, UpdateExamRequest request, CancellationToken ct = default)

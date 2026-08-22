@@ -6,6 +6,7 @@ using EconGrader.Application.Interfaces;
 using EconGrader.Application.Services;
 using EconGrader.Infrastructure.Services;
 using EconGrader.Infrastructure.Storage;
+using EconGrader.Web.Middleware;
 
 // ── Serilog (from appsettings Serilog: section) ──────────────────────────────
 Log.Logger = new LoggerConfiguration()
@@ -87,6 +88,8 @@ try
 
     // ── Pipeline ─────────────────────────────────────────────────────────────
     app.UseSerilogRequestLogging();
+    // Single place translating exceptions → HTTP problem responses.
+    app.UseMiddleware<ExceptionHandlingMiddleware>();
 
     if (app.Environment.IsDevelopment())
     {

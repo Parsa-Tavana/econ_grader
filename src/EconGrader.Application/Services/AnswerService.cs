@@ -1,4 +1,5 @@
 using EconGrader.Application.DTOs;
+using EconGrader.Application.Exceptions;
 using EconGrader.Domain.Entities;
 
 namespace EconGrader.Application.Services;
@@ -54,17 +55,19 @@ public sealed class AnswerService : IAnswerService
         _db.Answers.Add(a);
         await _db.SaveChangesAsync(ct);
         await _audit.WriteAsync("AnswerUploaded", "Answer", a.Id, null, new { a.ImageStorageKey, a.QuestionId });
-        return await GetAsync(a.Id, ct) ?? throw new InvalidOperationException("Failed to load created answer");
+        return await GetAsync(a.Id, ct) ?? throw new NotFoundException(nameof(Answer), a.Id);
     }
 
     public async Task<AnswerDto> SetTeacherScoreAsync(Guid answerId, decimal score, decimal? teacher2Score, CancellationToken ct = default)
     {
-        var a = await _db.Answers.FindAsync([answerId], ct) ?? throw new InvalidOperationException("Answer not found");
+        var a = await _db.Answers.FindAsync([answerId], ct) ?? throw new NotFoundException(nameof(Answer), answerId);
+        if (score < 0)
+            throw new BusinessRuleException("Teacher score cannot be negative", "INVALID_SCORE");
         a.TeacherScore = score;
         if (teacher2Score.HasValue) a.Teacher2Score = teacher2Score.Value;
         await _db.SaveChangesAsync(ct);
         await _audit.WriteAsync("TeacherScoreSet", "Answer", answerId, null, new { score, teacher2Score });
-        return await GetAsync(answerId, ct)!;
+        return (await GetAsync(answerId, ct))!;
     }
 
     public async Task<IReadOnlyList<AnswerDto>> ListByQuestionAsync(Guid questionId, CancellationToken ct = default)

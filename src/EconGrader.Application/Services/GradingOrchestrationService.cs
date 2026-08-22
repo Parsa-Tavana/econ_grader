@@ -1,9 +1,17 @@
 using EconGrader.Application.DTOs;
+using EconGrader.Application.Exceptions;
+using EconGrader.Application.Interfaces;
 using EconGrader.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
 namespace EconGrader.Application.Services;
+
+/// <summary>Result of an ensemble grading run.</summary>
+public sealed record EnsembleResult(
+    IReadOnlyList<GradingRun> Runs,
+    int ValidRuns,
+    decimal? MedianAiScore);
 
 /// <summary>
 /// Orchestrates a grading run: builds the request, calls the Python service
@@ -12,20 +20,15 @@ namespace EconGrader.Application.Services;
 /// </summary>
 public interface IGradingOrchestrationService
 {
-    Task<GradingRun> GradeAnswerAsync(
+    Task<EnsembleResult> GradeAnswerAsync(
         Guid answerId,
         decimal temperature,
         string promptVersion,
         string? provider = null,
         CancellationToken ct = default);
 
-    Task<IReadOnlyList<GradingRun>> GradeAnswerMultipleTimesAsync(
-        Guid answerId,
-        int runs,
-        decimal temperature,
-        string promptVersion,
-        string? provider = null,
-        CancellationToken ct = default);
+    Task<IReadOnlyList<GradingRun>> GetRunsForAnswerAsync(Guid answerId, CancellationToken ct = default);
+    Task<GradingRun?> GetRunAsync(Guid runId, CancellationToken ct = default);
 }
 
 public sealed class GradingOrchestrationService : IGradingOrchestrationService
@@ -50,14 +53,14 @@ public sealed class GradingOrchestrationService : IGradingOrchestrationService
         _logger = logger;
     }
 
-    public async Task<GradingRun> GradeAnswerAsync(
+    public async Task<EnsembleResult> GradeAnswerAsync(
         Guid answerId, decimal temperature, string promptVersion, string? provider = null, CancellationToken ct = default)
     {
         var answer = await _db.Answers
             .Include(a => a.Student)
             .Include(a => a.Question)
             .FirstOrDefaultAsync(a => a.Id == answerId, ct)
-            ?? throw new InvalidOperationException($"Answer {answerId} not found");
+            ?? throw new NotFoundException(nameof(Answer), answerId);
 
         var rubric = await GetActiveRubricAsync(answer.QuestionId, ct);
         var questionImageKey = $"questions/{answer.Question.ExamId}/q{answer.Question.Number}.png";
@@ -123,19 +126,17 @@ public sealed class GradingOrchestrationService : IGradingOrchestrationService
             _logger.LogWarning("Invalid grading run {RunId} for answer {AnswerId}: {Errors}",
                 run.Id, answerId, string.Join("; ", response.ValidationErrors));
         }
-        return run;
+        return new EnsembleResult(new[] { run }, run.IsValid ? 1 : 0, run.AiScore);
     }
 
-    public async Task<IReadOnlyList<GradingRun>> GradeAnswerMultipleTimesAsync(
-        Guid answerId, int runs, decimal temperature, string promptVersion, string? provider = null, CancellationToken ct = default)
-    {
-        var results = new List<GradingRun>();
-        for (int i = 0; i < runs; i++)
-        {
-            results.Add(await GradeAnswerAsync(answerId, temperature, promptVersion, provider, ct));
-        }
-        return results;
-    }
+    public async Task<IReadOnlyList<GradingRun>> GetRunsForAnswerAsync(Guid answerId, CancellationToken ct = default) =>
+        await _db.GradingRuns
+            .Where(r => r.AnswerId == answerId)
+            .OrderBy(r => r.CreatedAt)
+            .ToListAsync(ct);
+
+    public Task<GradingRun?> GetRunAsync(Guid runId, CancellationToken ct = default) =>
+        _db.GradingRuns.FirstOrDefaultAsync(r => r.Id == runId, ct);
 
     private async Task<Rubric> GetActiveRubricAsync(Guid questionId, CancellationToken ct)
     {
@@ -144,6 +145,6 @@ public sealed class GradingOrchestrationService : IGradingOrchestrationService
             .Where(r => r.QuestionId == questionId && r.IsActive)
             .OrderByDescending(r => r.Version)
             .FirstOrDefaultAsync(ct)
-            ?? throw new InvalidOperationException($"No active rubric found for question {questionId}");
+            ?? throw new NotFoundException("Active rubric for question", questionId);
     }
 }

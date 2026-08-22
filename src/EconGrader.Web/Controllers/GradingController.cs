@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Mvc;
 using EconGrader.Application.Interfaces;
 using EconGrader.Application.Services;
 using EconGrader.Domain.Entities;
-using Microsoft.EntityFrameworkCore;
 
 namespace EconGrader.Web.Controllers;
 
@@ -12,19 +11,11 @@ public sealed class GradingController : ControllerBase
 {
     private readonly IGradingOrchestrationService _orchestrator;
     private readonly IGradingClient _gradingClient;
-    private readonly IAppDbContext _db;
-    private readonly IAuditLogger _audit;
 
-    public GradingController(
-        IGradingOrchestrationService orchestrator,
-        IGradingClient gradingClient,
-        IAppDbContext db,
-        IAuditLogger audit)
+    public GradingController(IGradingOrchestrationService orchestrator, IGradingClient gradingClient)
     {
         _orchestrator = orchestrator;
         _gradingClient = gradingClient;
-        _db = db;
-        _audit = audit;
     }
 
     public sealed class GradeRequestDto
@@ -58,46 +49,32 @@ public sealed class GradingController : ControllerBase
         if (request.Runs < 1 || request.Runs > 10)
             return BadRequest("Runs must be between 1 and 10");
 
-        try
+        var allRuns = new List<GradingRun>();
+        for (int i = 0; i < request.Runs; i++)
         {
-            var results = await _orchestrator.GradeAnswerMultipleTimesAsync(
-                request.AnswerId,
-                request.Runs,
-                request.Temperature,
-                request.PromptVersion,
-                request.Provider,
-                ct);
+            var result = await _orchestrator.GradeAnswerAsync(
+                request.AnswerId, request.Temperature, request.PromptVersion, request.Provider, ct);
+            allRuns.AddRange(result.Runs);
+        }
 
-            var validScores = results.Where(r => r.IsValid).Select(r => r.AiScore).OrderBy(s => s).ToList();
-            decimal? median = validScores.Count == 0 ? null :
-                validScores.Count % 2 == 1
-                    ? validScores[validScores.Count / 2]
-                    : (validScores[validScores.Count / 2 - 1] + validScores[validScores.Count / 2]) / 2m;
+        var validScores = allRuns.Where(r => r.IsValid).Select(r => r.AiScore).OrderBy(s => s).ToList();
+        decimal? median = validScores.Count == 0 ? null :
+            validScores.Count % 2 == 1
+                ? validScores[validScores.Count / 2]
+                : (validScores[validScores.Count / 2 - 1] + validScores[validScores.Count / 2]) / 2m;
 
-            return Ok(new GradeResultDto(results, results.Count, validScores.Count, median));
-        }
-        catch (InvalidOperationException ex)
-        {
-            return NotFound(ex.Message);
-        }
-        catch (HttpRequestException ex)
-        {
-            return StatusCode(502, $"Grading service unavailable: {ex.Message}");
-        }
+        return Ok(new GradeResultDto(allRuns, allRuns.Count, validScores.Count, median));
     }
 
     /// <summary>All grading runs recorded for one answer.</summary>
     [HttpGet("answer/{answerId:guid}")]
     public async Task<ActionResult<IReadOnlyList<GradingRun>>> ListForAnswer(Guid answerId, CancellationToken ct) =>
-        Ok(await _db.GradingRuns
-            .Where(r => r.AnswerId == answerId)
-            .OrderBy(r => r.CreatedAt)
-            .ToListAsync(ct));
+        await _orchestrator.GetRunsForAnswerAsync(answerId, ct) is { } runs ? Ok(runs) : Ok(Array.Empty<GradingRun>());
 
     /// <summary>Full detail of a single run including raw AI response and per-criterion scores.</summary>
     [HttpGet("run/{runId:guid}")]
     public async Task<ActionResult<GradingRun>> GetRun(Guid runId, CancellationToken ct) =>
-        await _db.GradingRuns.FindAsync([runId], ct) is { } run ? Ok(run) : NotFound();
+        await _orchestrator.GetRunAsync(runId, ct) is { } run ? Ok(run) : NotFound();
 
     /// <summary>Available prompt versions from the Python grading service.</summary>
     [HttpGet("prompts")]

@@ -16,30 +16,16 @@ public sealed class TeacherReviewController : ControllerBase
         Guid runId,
         [FromBody] ReviewAcceptRequest body,
         [FromHeader(Name = "X-User-Id")] Guid teacherUserId,
-        CancellationToken ct)
-    {
-        try
-        {
-            var review = await _svc.AcceptAsync(runId, teacherUserId, body.Note, ct);
-            return Ok(review);
-        }
-        catch (InvalidOperationException ex) { return NotFound(ex.Message); }
-    }
+        CancellationToken ct) =>
+        Ok(await _svc.AcceptAsync(runId, teacherUserId, body.Note, ct));
 
     [HttpPost("override")]
     public async Task<IActionResult> Override(
         Guid runId,
         [FromBody] ReviewOverrideRequest body,
         [FromHeader(Name = "X-User-Id")] Guid teacherUserId,
-        CancellationToken ct)
-    {
-        try
-        {
-            var review = await _svc.OverrideAsync(runId, teacherUserId, body.NewScore, body.Note, ct);
-            return Ok(review);
-        }
-        catch (InvalidOperationException ex) { return NotFound(ex.Message); }
-    }
+        CancellationToken ct) =>
+        Ok(await _svc.OverrideAsync(runId, teacherUserId, body.NewScore, body.Note, ct));
 
     [HttpGet("history")]
     public async Task<IActionResult> History(Guid runId, CancellationToken ct) =>

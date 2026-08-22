@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using EconGrader.Application.DTOs;
+using EconGrader.Application.Exceptions;
 using EconGrader.Application.Interfaces;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -58,8 +59,9 @@ public sealed class GradingClient : IGradingClient
             throw new HttpRequestException($"Grading service error {resp.StatusCode}: {body}");
         }
 
-        var parsed = JsonSerializer.Deserialize<GradingServiceResponse>(body, _json)
-            ?? throw new InvalidOperationException("Failed to deserialize grading response");
+        var parsed = JsonSerializer.Deserialize<GradingServiceResponse>(body, _json);
+        if (parsed is null)
+            throw new DependencyException("GradingService", "Failed to deserialize grading response");
         return parsed;
     }
 

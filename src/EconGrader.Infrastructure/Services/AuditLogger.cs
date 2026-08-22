@@ -1,5 +1,4 @@
 using EconGrader.Application.Interfaces;
-using EconGrader.Application.Data;
 using EconGrader.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -10,10 +9,10 @@ namespace EconGrader.Infrastructure.Services;
 /// <summary>EF Core–backed audit trail — append-only, never edited/deleted.</summary>
 public sealed class AuditLogger : IAuditLogger
 {
-    private readonly AppDbContext _db;
+    private readonly IAppDbContext _db;
     private readonly ILogger<AuditLogger> _logger;
 
-    public AuditLogger(AppDbContext db, ILogger<AuditLogger> logger)
+    public AuditLogger(IAppDbContext db, ILogger<AuditLogger> logger)
     {
         _db = db;
         _logger = logger;

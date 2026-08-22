@@ -1,4 +1,6 @@
+using EconGrader.Application.Exceptions;
 using EconGrader.Application.Interfaces;
+using EconGrader.Domain.Entities;
 
 namespace EconGrader.Application.Services;
 
@@ -21,6 +23,10 @@ public record TeacherReviewDto(
     ReviewAction Action
 );
 
+/// <summary>
+/// Append-only teacher review trail. Accept keeps AI score; Override replaces it.
+/// Never mutates past reviews — every decision is recorded.
+/// </summary>
 public sealed class TeacherReviewService : ITeacherReviewService
 {
     private readonly IAppDbContext _db;
@@ -28,41 +34,11 @@ public sealed class TeacherReviewService : ITeacherReviewService
 
     public TeacherReviewService(IAppDbContext db, IAuditLogger audit) { _db = db; _audit = audit; }
 
-    public async Task<TeacherReview> AcceptAsync(Guid runId, Guid teacherUserId, string? note, CancellationToken ct = default)
-    {
-        var run = await _db.GradingRuns.FindAsync([runId], ct) ?? throw new InvalidOperationException("Run not found");
-        var review = new TeacherReview
-        {
-            GradingRunId = runId,
-            TeacherUserId = teacherUserId,
-            OldAiScore = run.AiScore,
-            NewScore = run.AiScore,
-            Note = note,
-            Action = ReviewAction.Accept,
-        };
-        _db.TeacherReviews.Add(review);
-        await _db.SaveChangesAsync(ct);
-        await _audit.WriteAsync("TeacherAccepted", "TeacherReview", review.Id, teacherUserId, new { runId, run.AiScore });
-        return review;
-    }
+    public Task<TeacherReview> AcceptAsync(Guid runId, Guid teacherUserId, string? note, CancellationToken ct = default) =>
+        CreateReviewAsync(runId, teacherUserId, ReviewAction.Accept, score => score, note, "TeacherAccepted", ct);
 
-    public async Task<TeacherReview> OverrideAsync(Guid runId, Guid teacherUserId, decimal newScore, string? note, CancellationToken ct = default)
-    {
-        var run = await _db.GradingRuns.FindAsync([runId], ct) ?? throw new InvalidOperationException("Run not found");
-        var review = new TeacherReview
-        {
-            GradingRunId = runId,
-            TeacherUserId = teacherUserId,
-            OldAiScore = run.AiScore,
-            NewScore = newScore,
-            Note = note,
-            Action = ReviewAction.Override,
-        };
-        _db.TeacherReviews.Add(review);
-        await _db.SaveChangesAsync(ct);
-        await _audit.WriteAsync("TeacherOverrode", "TeacherReview", review.Id, teacherUserId, new { runId, Old = run.AiScore, New = newScore });
-        return review;
-    }
+    public Task<TeacherReview> OverrideAsync(Guid runId, Guid teacherUserId, decimal newScore, string? note, CancellationToken ct = default) =>
+        CreateReviewAsync(runId, teacherUserId, ReviewAction.Override, _ => newScore, note, "TeacherOverrode", ct);
 
     public async Task<IReadOnlyList<TeacherReviewDto>> GetHistoryAsync(Guid runId, CancellationToken ct = default)
     {
@@ -74,5 +50,33 @@ public sealed class TeacherReviewService : ITeacherReviewService
                 r.Id, r.GradingRunId, r.TeacherUserId, r.Teacher.DisplayName,
                 r.OldAiScore, r.NewScore, r.Note, r.ReviewedAt, r.Action))
             .ToListAsync(ct);
+    }
+
+    /// <summary>Single code path for both actions — differs only by resolved new-score and audit verb.</summary>
+    private async Task<TeacherReview> CreateReviewAsync(
+        Guid runId, Guid teacherUserId, ReviewAction action,
+        Func<decimal, decimal> resolveNewScore, string? note, string auditAction, CancellationToken ct)
+    {
+        var run = await _db.GradingRuns.FindAsync([runId], ct)
+            ?? throw new NotFoundException(nameof(GradingRun), runId);
+
+        var review = new TeacherReview
+        {
+            GradingRunId = runId,
+            TeacherUserId = teacherUserId,
+            OldAiScore = run.AiScore,
+            NewScore = resolveNewScore(run.AiScore),
+            Note = note,
+            Action = action,
+        };
+        _db.TeacherReviews.Add(review);
+        await _db.SaveChangesAsync(ct);
+        await _audit.WriteAsync(auditAction, nameof(TeacherReview), review.Id, teacherUserId, new
+        {
+            runId,
+            Old = review.OldAiScore,
+            New = review.NewScore,
+        });
+        return review;
     }
 }

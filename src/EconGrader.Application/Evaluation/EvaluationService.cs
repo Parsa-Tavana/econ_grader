@@ -1,3 +1,4 @@
+using EconGrader.Application.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
 namespace EconGrader.Application.Evaluation;
@@ -8,9 +9,9 @@ namespace EconGrader.Application.Evaluation;
 /// </summary>
 public sealed class EvaluationService
 {
-    private readonly AppDbContext _db;
+    private readonly IAppDbContext _db;
 
-    public EvaluationService(AppDbContext db) => _db = db;
+    public EvaluationService(IAppDbContext db) => _db = db;
 
     public async Task<EvaluationResultDto> ForQuestionAsync(
         Guid questionId,

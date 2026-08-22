@@ -87,17 +87,8 @@ public sealed class AnswersController : ControllerBase
     public async Task<ActionResult<AnswerDto>> SetTeacherScore(
         Guid id,
         [FromBody] SetTeacherScoreRequest request,
-        CancellationToken ct)
-    {
-        try
-        {
-            return Ok(await _svc.SetTeacherScoreAsync(id, request.Score, request.Teacher2Score, ct));
-        }
-        catch (InvalidOperationException ex)
-        {
-            return NotFound(ex.Message);
-        }
-    }
+        CancellationToken ct) =>
+        Ok(await _svc.SetTeacherScoreAsync(id, request.Score, request.Teacher2Score, ct));
 }
 
 public record SetTeacherScoreRequest(decimal Score, decimal? Teacher2Score);
