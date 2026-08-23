@@ -39,6 +39,10 @@ public sealed class ExamService : IExamService
 
     public async Task<ExamDto> CreateAsync(CreateExamRequest request, Guid createdByUserId, CancellationToken ct = default)
     {
+        // Identity is attribution-only: auto-provision a placeholder user row
+        // so the Exams.CreatedByUserId FK is satisfied for any valid GUID.
+        await _db.EnsureUserAsync(createdByUserId, ct);
+
         var exam = new Exam { Name = request.Name, Year = request.Year, Description = request.Description, CreatedByUserId = createdByUserId };
         _db.Exams.Add(exam);
         await _db.SaveChangesAsync(ct);
