@@ -7,8 +7,10 @@
 **/obj/
 
 # ── Runtime data & logs never belong in a build context ──────────────────────
-storage/
-logs/
+# Anchored to repo root ONLY — an unanchored "storage/" would also exclude
+# src/EconGrader.Infrastructure/Storage/ source code (the CS0234 bug).
+/storage/
+/logs/
 
 # ── VCS / IDE / OS noise ─────────────────────────────────────────────────────
 .git

@@ -34,7 +34,10 @@ htmlcov/
 
 # ===== Runtime application data =====
 # uploaded exam answer images (created by LocalFileStorage at runtime)
-storage/
+# ANCHORED to repo root only — an unanchored "storage/" also matches
+# src/EconGrader.Infrastructure/Storage/ source code on case-insensitive FS.
+/storage/
+/storage/images/
 # Serilog output
 logs/
 *.log
