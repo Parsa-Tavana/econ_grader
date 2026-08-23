@@ -10,7 +10,8 @@ COPY ["src/EconGrader.Web/EconGrader.Web.csproj", "EconGrader.Web/"]
 # Fresh restore + publish inside the container — never reuse host obj/
 # artifacts (their project.assets.json embeds Windows NuGet paths that
 # crash FallbackPackagePathResolver on Linux with MSB4018).
-RUN dotnet restore
+# (No .sln is copied, so the project must be named explicitly.)
+RUN dotnet restore "EconGrader.Web/EconGrader.Web.csproj"
 COPY src/ .
 RUN dotnet publish "EconGrader.Web/EconGrader.Web.csproj" -c Release -o /app/publish --no-restore
 
