@@ -32,11 +32,14 @@ services:
       - QWEN_API_KEY=not-needed
       - DEFAULT_TEMPERATURE=0.0
       - DEFAULT_MAX_TOKENS=2048
+      # MUST match FileStorage__RootPath of the api service below:
+      # the API sends absolute image paths to Python, so both containers
+      # need the identical shared volume mounted at the same path.
       - IMAGE_STORAGE_ROOT=/srv/storage/images
       - PROMPTS_DIR=/srv/app/prompts
       - LOG_LEVEL=INFO
     volumes:
-      - grading_storage:/srv/storage
+      - app_storage:/srv/storage
     ports:
       - "5001:5001"
     depends_on:
@@ -56,10 +59,11 @@ services:
       - ASPNETCORE_ENVIRONMENT=Production
       - ConnectionStrings__DefaultConnection=Server=db,1433;Database=EconGrader;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=True;Encrypt=False
       - GradingService__BaseUrl=http://grading:5001
-      - FileStorage__RootPath=/app/storage/images
+      - FileStorage__RootPath=/srv/storage/images
       - Serilog__MinimumLevel__Default=Information
     volumes:
-      - api_storage:/app/storage
+      # Same volume & path as the grading service (see comment above).
+      - app_storage:/srv/storage
       - api_logs:/app/logs
     ports:
       - "8080:8080"
@@ -71,6 +75,5 @@ services:
 
 volumes:
   sql_data:
-  grading_storage:
-  api_storage:
+  app_storage:
   api_logs:
