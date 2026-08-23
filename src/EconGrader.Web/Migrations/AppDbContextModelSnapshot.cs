@@ -482,13 +482,13 @@ namespace EconGrader.Web.Migrations
                     b.HasOne("EconGrader.Domain.Entities.Question", "Question")
                         .WithMany("GradingRuns")
                         .HasForeignKey("QuestionId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("EconGrader.Domain.Entities.Student", "Student")
                         .WithMany()
                         .HasForeignKey("StudentId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.Navigation("Answer");

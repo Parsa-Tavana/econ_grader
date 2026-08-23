@@ -71,11 +71,15 @@ public sealed class AppDbContext : DbContext, IAppDbContext
         });
 
         // GradingRun - THE core entity
+        // NOTE: only the Answer FK may cascade. SQL Server forbids multiple
+        // cascade paths (Answer→Question and Answer→Student already cascade),
+        // so Question/Student use Restrict — deleting a question or student is
+        // still blocked by the Answer-level cascades until its answers are gone.
         b.Entity<GradingRun>(e =>
         {
             e.HasOne(x => x.Answer).WithMany(x => x.GradingRuns).HasForeignKey(x => x.AnswerId).OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(x => x.Question).WithMany(x => x.GradingRuns).HasForeignKey(x => x.QuestionId).OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(x => x.Student).WithMany().HasForeignKey(x => x.StudentId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Question).WithMany(x => x.GradingRuns).HasForeignKey(x => x.QuestionId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Student).WithMany().HasForeignKey(x => x.StudentId).OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(x => new { x.AnswerId, x.CreatedAt });
             e.HasIndex(x => new { x.QuestionId, x.Provider, x.ModelName, x.PromptVersion });
         });
