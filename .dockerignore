@@ -1,0 +1,25 @@
+# ── Host build artifacts MUST NOT enter the image ────────────────────────────
+# obj/ contains project.assets.json generated on the HOST (Windows). It embeds
+# Windows NuGet fallback-folder paths ("C:\Program Files (x86)\...") which make
+# NuGet's FallbackPackagePathResolver throw (MSB4018) during in-container
+# publish. Excluding obj/ forces a clean restore inside the container.
+**/bin/
+**/obj/
+
+# ── Runtime data & logs never belong in a build context ──────────────────────
+storage/
+logs/
+
+# ── VCS / IDE / OS noise ─────────────────────────────────────────────────────
+.git
+.github
+.vs
+.vscode
+.idea
+
+# ── Frontend (not needed by either backend image) ────────────────────────────
+frontend/node_modules
+frontend/dist
+
+# NOTE: appsettings*.json are intentionally NOT ignored — they are required
+# at runtime and provide defaults overridden by compose environment vars.
