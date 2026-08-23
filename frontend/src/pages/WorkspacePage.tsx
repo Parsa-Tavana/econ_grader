@@ -21,6 +21,7 @@ import {
   acceptRun,
   overrideRun,
 } from "../api/grading";
+import { getUserId, isValidGuid, setUserId } from "../api/client";
 import type { GradingRun } from "../types/models";
 import { parseCriteriaScores } from "../types/models";
 import {
@@ -40,12 +41,14 @@ import {
 import { AnswerStatusBadge } from "../components/common";
 import { formatCost, formatLatency, formatNumber, formatScore, formatDateTime, timeAgo } from "../utils/format";
 import { currentLang } from "../hooks/useLang";
+import { useToast } from "../hooks/useToast";
 
 export default function WorkspacePage() {
   const { answerId = "" } = useParams();
   const { t } = useTranslation();
   const lang = currentLang();
   const qc = useQueryClient();
+  const toast = useToast();
 
   const answerQ = useQuery({ queryKey: ["answer", answerId], queryFn: () => getAnswer(answerId) });
   const questionQ = useQuery({
@@ -73,6 +76,9 @@ export default function WorkspacePage() {
   const [reviewMode, setReviewMode] = useState<"accept" | "override" | null>(null);
   const [overrideScore, setOverrideScore] = useState<number>(0);
   const [note, setNote] = useState("");
+  // identity captured inside the review dialog when no valid GUID is configured
+  const [identityInput, setIdentityInput] = useState(getUserId() ?? "");
+  const [identityError, setIdentityError] = useState<string | null>(null);
 
   const latestValid = useMemo(
     () =>
@@ -93,27 +99,73 @@ export default function WorkspacePage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["runs", answerId] });
       qc.invalidateQueries({ queryKey: ["answer", answerId] });
+      toast.info(t("states.gradingStarted"));
     },
-    onError: (e) => alert(friendlyError(e, t)),
+    onError: (e) => toast.error(friendlyError(e, t)),
   });
 
+  /**
+   * Review flow:
+   *   1. accept/override the run (append-only review record) — required
+   *   2. best-effort sync of the answer's canonical teacher score.
+   * Step 2 failing no longer loses the review; the user is told to re-save
+   * the score manually instead of getting a confusing partial-failure alert.
+   */
   const reviewMut = useMutation({
     mutationFn: async () => {
-      if (!latestValid) return;
+      if (!latestValid || !reviewMode) return;
       if (reviewMode === "accept") await acceptRun(latestValid.id, note || undefined);
       else await overrideRun(latestValid.id, overrideScore, note || undefined);
-      // keep the answer's canonical teacher score in sync
+
       const score = reviewMode === "accept" ? latestValid.aiScore : overrideScore;
-      await apiSetTeacherScore(answerId, score);
+      try {
+        await apiSetTeacherScore(answerId, score);
+      } catch (syncErr) {
+        // The review itself is already recorded — surface the score-sync
+        // failure distinctly and keep the dialog open so nothing is lost.
+        toast.error(
+          `${t("workspace.reviewRecorded")} — ${friendlyError(syncErr, t)}`
+        );
+        throw new Error("SCORE_SYNC_FAILED");
+      }
     },
-    onSuccess: () => {
+    onSuccess: (_data, _vars, ctx) => {
+      if (ctx === "SCORE_SYNC_FAILED") return; // handled above; keep dialog state
       qc.invalidateQueries({ queryKey: ["runs", answerId] });
       qc.invalidateQueries({ queryKey: ["answer", answerId] });
       setReviewMode(null);
       setNote("");
+      toast.success(t("states.reviewSaved"));
     },
-    onError: (e) => alert(friendlyError(e, t)),
+    onError: (e) => {
+      if (e instanceof Error && e.message === "SCORE_SYNC_FAILED") {
+        qc.invalidateQueries({ queryKey: ["runs", answerId] });
+        qc.invalidateQueries({ queryKey: ["answer", answerId] });
+        return;
+      }
+      toast.error(friendlyError(e, t));
+    },
   });
+
+  function openReview(mode: "accept" | "override") {
+    if (!latestValid) return;
+    setIdentityInput(getUserId() ?? "");
+    setIdentityError(isValidGuid(getUserId()) ? null : t("settings.userIdInvalid"));
+    setReviewMode(mode);
+  }
+
+  /** Blocks submit until a valid GUID identity is present (backend requires X-User-Id). */
+  function handleReviewSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const value = identityInput.trim();
+    if (!isValidGuid(value)) {
+      setIdentityError(t("settings.userIdInvalid"));
+      return;
+    }
+    setIdentityError(null);
+    setUserId(value);
+    reviewMut.mutate();
+  }
 
   if (answerQ.isLoading) return <LoadingBlock />;
   if (answerQ.isError)
@@ -122,6 +174,7 @@ export default function WorkspacePage() {
   const answer = answerQ.data!;
   const question = questionQ.data;
   const criteriaScores = latestValid ? parseCriteriaScores(latestValid.criteriaScoresJson) : [];
+  const identityReady = isValidGuid(identityInput.trim());
 
   return (
     <>
@@ -256,16 +309,10 @@ export default function WorkspacePage() {
                 ) : null}
 
                 <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-100 pt-4">
-                  <Button onClick={() => { setOverrideScore(latestValid.aiScore); setReviewMode("accept"); }}>
+                  <Button onClick={() => openReview("accept")}>
                     <Check size={15} /> {t("workspace.accept")}
                   </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      setOverrideScore(answer.teacherScore ?? latestValid.aiScore);
-                      setReviewMode("override");
-                    }}
-                  >
+                  <Button variant="secondary" onClick={() => openReview("override")}>
                     <Pencil size={14} /> {t("workspace.override")}
                   </Button>
                   <span className="flex-1" />
@@ -368,12 +415,32 @@ export default function WorkspacePage() {
         description={t("gradingDialog.blindGradingNote")}
       >
         {reviewMode ? (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              reviewMut.mutate();
-            }}
-          >
+          <form onSubmit={handleReviewSubmit}>
+            {/* Identity guard — backend rejects reviews without a valid GUID header */}
+            {!identityReady || identityError ? (
+              <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                <Field label={`${t("settings.userId")} (${t("common.required")})`} htmlFor="rv-uid">
+                  <Input
+                    id="rv-uid"
+                    value={identityInput}
+                    onChange={(e) => {
+                      setIdentityInput(e.target.value);
+                      setIdentityError(null);
+                    }}
+                    placeholder="00000000-0000-0000-0000-000000000000"
+                    autoComplete="off"
+                    dir="ltr"
+                    required
+                  />
+                </Field>
+                {identityError ? (
+                  <p className="mt-1.5 text-xs text-red-600" role="alert">
+                    {identityError}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
             {reviewMode === "override" ? (
               <Field label={t("students.teacherScore")} required htmlFor="ov-score">
                 <Input

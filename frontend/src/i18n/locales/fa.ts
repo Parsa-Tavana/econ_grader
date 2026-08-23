@@ -260,6 +260,12 @@ const fa = {
     reason: "دلیل اصلاح",
     reasonPlaceholder: "مثلاً: معیار دوم به‌طور کامل رعایت شده است.",
     noteOptional: "یادداشت (اختیاری)",
+    acceptTitle: "تأیید نمره هوش مصنوعی",
+    acceptConfirm: "با این کار نمره AI به‌عنوان نمره نهایی استاد ثبت می‌شود:",
+    overrideTitle: "اصلاح نمره",
+    reviewRecorded: "بررسی ثبت شد، اما ذخیره نمره استاد ناموفق بود",
+    reviewedAs: "بازبینی‌شده به‌عنوان",
+    score: "نمره",
     reviewHistory: "تاریخچه بررسی",
     acceptedBy: "استاد تأیید کرد",
     overriddenBy: "اصلاح توسط استاد",
@@ -280,6 +286,16 @@ const fa = {
     rotate: "چرخش",
     resetView: "بازنشانی نما",
     zoomLevel: "میزان زوم",
+  },
+  runs: {
+    subtitle: "هر اجرا یک ارزیابی مستقل هوش مصنوعی است",
+  },
+  grading: {
+    valid: "معتبر",
+    invalid: "نامعتبر",
+  },
+  reviews: {
+    note: "یادداشت",
   },
   gradingDialog: {
     title: "اجرای تصحیح با هوش مصنوعی",
@@ -356,6 +372,9 @@ const fa = {
     userId: "شناسه کاربر (X-User-Id)",
     userIdHint:
       "برای انتساب فعالیت‌ها استفاده می‌شود؛ احراز هویت واقعی هنوز فعال نیست",
+    userIdInvalid: "شناسه کاربر باید یک GUID معتبر باشد، مثلاً 00000000-0000-0000-0000-000000000000",
+    userIdRequiredForReview:
+      "پیش از تأیید یا اصلاح نمره AI الزامی است — همین‌جا یا از طریق پنجره بررسی ثبت کنید.",
     systemHealth: "سلامت سیستم",
     apiStatus: "وضعیت API",
     gradingServiceStatus: "سرویس تصحیح (Python)",

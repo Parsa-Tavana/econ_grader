@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { clsx } from "clsx";
 import { healthCheck } from "../api/system";
-import { setUserId, getUserId } from "../api/client";
+import { setUserId, getUserId, isValidGuid } from "../api/client";
 import { changeLanguage, type AppLang } from "../i18n";
 import { PageHeader, Card, CardHeader, Badge, Input, Field, Button } from "../components/ui";
 
@@ -13,6 +13,7 @@ export default function SettingsPage() {
   // identity
   const [uid, setUid] = useState(getUserId() ?? "");
   const [savedFlash, setSavedFlash] = useState(false);
+  const [uidError, setUidError] = useState<string | null>(null);
 
   // health
   const [healthState, setHealthState] = useState<"loading" | "up" | "down">("loading");
@@ -77,7 +78,13 @@ export default function SettingsPage() {
             <Button
               size="sm"
               onClick={() => {
-                setUserId(uid.trim() || null);
+                const value = uid.trim();
+                if (value && !isValidGuid(value)) {
+                  setUidError(t("settings.userIdInvalid"));
+                  return;
+                }
+                setUidError(null);
+                setUserId(value || null);
                 setSavedFlash(true);
                 window.setTimeout(() => setSavedFlash(false), 2000);
               }}
@@ -91,6 +98,15 @@ export default function SettingsPage() {
               </Badge>
             ) : null}
           </div>
+          {uidError ? (
+            <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-600" role="alert">
+              {uidError}
+            </p>
+          ) : (
+            <p className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-700">
+              {t("settings.userIdRequiredForReview")}
+            </p>
+          )}
         </Card>
 
         {/* System health */}

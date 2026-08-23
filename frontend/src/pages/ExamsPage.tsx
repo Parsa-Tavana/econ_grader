@@ -21,6 +21,7 @@ import {
 } from "../components/ui";
 import { formatNumber, timeAgo } from "../utils/format";
 import { currentLang } from "../hooks/useLang";
+import { useToast } from "../hooks/useToast";
 
 interface ExamForm {
   name: string;
@@ -38,6 +39,7 @@ export default function ExamsPage() {
   const { t } = useTranslation();
   const lang = currentLang();
   const qc = useQueryClient();
+  const toast = useToast();
 
   const examsQ = useQuery({ queryKey: ["exams"], queryFn: listExams });
 
@@ -58,8 +60,9 @@ export default function ExamsPage() {
     onSuccess: () => {
       invalidate();
       closeDialog();
+      toast.success(t("states.reviewSaved"));
     },
-    onError: (e) => alert(friendlyError(e, t)),
+    onError: (e) => toast.error(friendlyError(e, t)),
   });
 
   const updateMut = useMutation({
@@ -72,8 +75,9 @@ export default function ExamsPage() {
     onSuccess: () => {
       invalidate();
       closeDialog();
+      toast.success(t("states.reviewSaved"));
     },
-    onError: (e) => alert(friendlyError(e, t)),
+    onError: (e) => toast.error(friendlyError(e, t)),
   });
 
   const deleteMut = useMutation({
@@ -81,8 +85,9 @@ export default function ExamsPage() {
     onSuccess: () => {
       invalidate();
       setDeleteTarget(null);
+      toast.success(t("common.delete") + " ✓");
     },
-    onError: (e) => alert(friendlyError(e, t)),
+    onError: (e) => toast.error(friendlyError(e, t)),
   });
 
   function openCreate() {
@@ -211,7 +216,7 @@ export default function ExamsPage() {
             <Button type="button" variant="secondary" onClick={closeDialog}>
               {t("common.cancel")}
             </Button>
-            <Button type="submit" loading={createMut.isPending || updateMut.isPending}>
+            <Button type="submit" loading={createMut.isPending || updateMut.isPending} disabled={createMut.isPending || updateMut.isPending}>
               {t("common.save")}
             </Button>
           </div>

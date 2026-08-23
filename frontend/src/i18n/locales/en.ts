@@ -260,6 +260,12 @@ const en = {
     reason: "Reason for change",
     reasonPlaceholder: "e.g. The second criterion is fully satisfied.",
     noteOptional: "Note (optional)",
+    acceptTitle: "Accept AI score",
+    acceptConfirm: "This will record the AI score as the final teacher score:",
+    overrideTitle: "Override score",
+    reviewRecorded: "Review recorded, but saving the teacher score failed",
+    reviewedAs: "Reviewed as",
+    score: "Score",
     reviewHistory: "Review history",
     acceptedBy: "Teacher accepted",
     overriddenBy: "Teacher overrode",
@@ -281,6 +287,16 @@ const en = {
     rotate: "Rotate",
     resetView: "Reset view",
     zoomLevel: "Zoom level",
+  },
+  runs: {
+    subtitle: "Each run is an independent AI evaluation",
+  },
+  grading: {
+    valid: "Valid",
+    invalid: "Invalid",
+  },
+  reviews: {
+    note: "Note",
   },
   gradingDialog: {
     title: "Run AI grading",
@@ -358,6 +374,9 @@ const en = {
     userId: "User ID (X-User-Id)",
     userIdHint:
       "Used for activity attribution; real authentication is not enabled yet",
+    userIdInvalid: "User ID must be a valid GUID, e.g. 00000000-0000-0000-0000-000000000000",
+    userIdRequiredForReview:
+      "Required before accepting or overriding an AI score — set it here or via the review dialog.",
     systemHealth: "System health",
     apiStatus: "API status",
     gradingServiceStatus: "Grading service (Python)",

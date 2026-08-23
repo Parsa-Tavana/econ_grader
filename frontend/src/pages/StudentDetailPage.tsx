@@ -23,6 +23,7 @@ import {
   friendlyError,
 } from "../components/ui";
 import { AnswerStatusBadge } from "../components/common";
+import { useToast } from "../hooks/useToast";
 
 export default function StudentDetailPage() {
   const { studentId = "" } = useParams();
@@ -124,6 +125,7 @@ function AnswerRow({
 }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
+  const toast = useToast();
   const answersQ = useQuery({
     queryKey: ["answers", "question", question.id],
     queryFn: () => listAnswersByQuestion(question.id),
@@ -138,8 +140,9 @@ function AnswerRow({
     try {
       await uploadAnswer(studentId, question.id, file);
       await qc.invalidateQueries({ queryKey: ["answers", "question", question.id] });
+      toast.success(t("answers.uploadSuccess"));
     } catch (err) {
-      alert(friendlyError(err, t));
+      toast.error(friendlyError(err, t));
     } finally {
       onUploading(false);
     }

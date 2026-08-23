@@ -40,6 +40,7 @@ import {
 } from "../components/ui";
 import { formatScore, formatNumber } from "../utils/format";
 import { currentLang } from "../hooks/useLang";
+import { useToast } from "../hooks/useToast";
 
 interface RubricCriterionInput {
   description: string;
@@ -64,6 +65,7 @@ export default function ExamDetailPage() {
   const { examId = "" } = useParams();
   const { t } = useTranslation();
   const qc = useQueryClient();
+  const toast = useToast();
 
   const examQ = useQuery({ queryKey: ["exam", examId], queryFn: () => getExam(examId) });
   const questionsQ = useQuery({
@@ -125,14 +127,15 @@ export default function ExamDetailPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["questions", examId] });
       setQDialogOpen(false);
+      toast.success(t("states.reviewSaved"));
     },
-    onError: (e) => alert(friendlyError(e, t)),
+    onError: (e) => toast.error(friendlyError(e, t)),
   });
 
   const deleteQuestionMut = useMutation({
     mutationFn: deleteQuestion,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["questions", examId] }),
-    onError: (e) => alert(friendlyError(e, t)),
+    onError: (e) => toast.error(friendlyError(e, t)),
   });
 
   const saveRubricMut = useMutation({
@@ -151,8 +154,9 @@ export default function ExamDetailPage() {
     onSuccess: (_data, _vars) => {
       qc.invalidateQueries({ queryKey: ["rubric"] });
       setRubricQ(null);
+      toast.success(t("rubric.versionCreated"));
     },
-    onError: (e) => alert(friendlyError(e, t)),
+    onError: (e) => toast.error(friendlyError(e, t)),
   });
 
   if (examQ.isLoading || questionsQ.isLoading) return <LoadingBlock />;
@@ -301,6 +305,7 @@ function QuestionCard({
   });
   const studentsQ = useQuery({ queryKey: ["students"], queryFn: listStudents });
   const [uploading, setUploading] = useState(false);
+  const toast = useToast();
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -319,8 +324,9 @@ function QuestionCard({
       }
       await uploadAnswer(student.id, question.id, file);
       await qc.invalidateQueries({ queryKey: ["answers", "question", question.id] });
+      toast.success(t("answers.uploadSuccess"));
     } catch (err) {
-      alert(friendlyError(err, t));
+      toast.error(friendlyError(err, t));
     } finally {
       setUploading(false);
       e.target.value = "";

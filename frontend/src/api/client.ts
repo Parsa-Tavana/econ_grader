@@ -12,6 +12,13 @@ export const api = axios.create({
 /** Identity is a trusted X-User-Id GUID header (attribution only — see PROJECT_MAP §8). */
 let currentUserId: string | null = localStorage.getItem("econgrader.userId");
 
+const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Strict GUID check — the backend binds X-User-Id as a Guid and rejects anything else. */
+export function isValidGuid(value: string | null | undefined): boolean {
+  return !!value && GUID_RE.test(value.trim());
+}
+
 export function setUserId(id: string | null) {
   currentUserId = id;
   if (id) localStorage.setItem("econgrader.userId", id);
@@ -44,5 +51,6 @@ export function apiErrorMessage(err: unknown): string {
     if (err.code === "ERR_NETWORK") return "NETWORK_ERROR";
     return err.message;
   }
+  if (err instanceof Error && err.message) return err.message;
   return String(err);
 }

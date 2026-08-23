@@ -31,6 +31,11 @@ try
     var gradingServiceBaseUrl = builder.Configuration["GradingService:BaseUrl"] ?? "http://localhost:5001";
     var fileStorageRoot = builder.Configuration["FileStorage:RootPath"] ?? Path.Combine(AppContext.BaseDirectory, "storage", "images");
 
+    // CORS: comma-separated allowed origins (e.g. "http://localhost:5173,https://grader.example.com").
+    // "*" allows any origin — dev convenience only; set explicit origins in production.
+    var corsOrigins = (builder.Configuration["Cors:AllowedOrigins"] ?? "*")
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
     // ── EF Core (SQL Server) ────────────────────────────────────────────────
     builder.Services.AddDbContext<AppDbContext>(options =>
         options.UseSqlServer(connectionString, sql =>
@@ -77,6 +82,20 @@ try
         });
     builder.Services.AddEndpointsApiExplorer();
     builder.Services.AddOpenApi();
+
+    // ── CORS ─────────────────────────────────────────────────────────────────
+    builder.Services.AddCors(o =>
+    {
+        if (corsOrigins.Length == 1 && corsOrigins[0] == "*")
+        {
+            o.AddDefaultPolicy(policy => policy.AllowAnyOrigin());
+        }
+        else
+        {
+            o.AddDefaultPolicy(policy =>
+                policy.WithOrigins(corsOrigins).AllowAnyHeader().AllowAnyMethod());
+        }
+    });
     // Accept large multipart uploads (answer scans)
     builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(o =>
     {
@@ -97,6 +116,7 @@ try
     }
 
     app.UseHttpsRedirection();
+    app.UseCors();
     app.MapControllers();
 
     // Auto-migrate the database at startup (safe: idempotent).

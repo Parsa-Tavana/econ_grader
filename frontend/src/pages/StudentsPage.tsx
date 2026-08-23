@@ -20,11 +20,13 @@ import {
 import { timeAgo } from "../utils/format";
 import { currentLang } from "../hooks/useLang";
 import { useDebounce } from "../hooks/useDebounce";
+import { useToast } from "../hooks/useToast";
 
 export default function StudentsPage() {
   const { t } = useTranslation();
   const lang = currentLang();
   const qc = useQueryClient();
+  const toast = useToast();
   const studentsQ = useQuery({ queryKey: ["students"], queryFn: listStudents });
 
   const [search, setSearch] = useState("");
@@ -53,8 +55,9 @@ export default function StudentsPage() {
       setShowCreate(false);
       setExternalId("");
       setDisplayName("");
+      toast.success(t("states.reviewSaved"));
     },
-    onError: (e) => alert(friendlyError(e, t)),
+    onError: (e) => toast.error(friendlyError(e, t)),
   });
 
   if (studentsQ.isLoading) return <LoadingBlock />;

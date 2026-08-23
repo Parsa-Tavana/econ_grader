@@ -43,6 +43,10 @@ logs/
 node_modules/
 dist/
 .vite/
+# TypeScript incremental build artifacts
+*.tsbuildinfo
+# Test coverage
+coverage/
 
 # ===== IDE =====
 .idea/
