@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   db:
     image: mcr.microsoft.com/mssql/server:2022-latest
@@ -20,8 +18,10 @@ services:
 
   grading:
     build:
-      context: .
-      dockerfile: Dockerfile.grading
+      # Context MUST be the grading-service folder — Dockerfile.grading
+      # copies requirements.txt / app/ / pricing.json relative to it.
+      context: ./grading-service
+      dockerfile: ../Dockerfile.grading
     container_name: econgrader-grading
     environment:
       - MODEL_PROVIDER=claude
@@ -52,6 +52,7 @@ services:
 
   api:
     build:
+      # Repo-root context — Dockerfile.api copies src/... projects.
       context: .
       dockerfile: Dockerfile.api
     container_name: econgrader-api
