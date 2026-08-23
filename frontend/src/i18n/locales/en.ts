@@ -151,6 +151,10 @@ const en = {
     mustHaveCriterion: "At least one criterion is required",
     invalidCriteria:
       "Each criterion needs an ID and description, and a score greater than zero",
+    criterionDescription: "Criterion description",
+    editRubric: "Edit rubric",
+    hint: "Each criterion states what earns credit. Saving creates a new version; history is preserved.",
+    totalMaxScore: "Sum of criteria",
     versionCreated: "New rubric version saved",
     activeBadge: "Active",
   },
@@ -169,6 +173,12 @@ const en = {
     answers: "Student answers",
     gradingHistory: "Grading history",
     noAnswers: "This student has no answers yet",
+    externalId: "Student ID",
+    displayName: "Name",
+    teacherScore: "Teacher score",
+    countLabel: "{{count}} students",
+    answersTitle: "Answers by question",
+    externalIdPrompt: "Enter the student ID:",
     externalIdPlaceholder: "e.g. STU-001",
     namePlaceholder: "Full name (optional)",
   },
@@ -185,6 +195,10 @@ const en = {
     setTeacherScore: "Set / edit teacher score",
     teacherScoreUpdated: "Teacher score saved",
     uploadSuccess: "Answer uploaded",
+    uploading: "Uploading...",
+    replaceImage: "Replace image",
+    uniquePerStudentQuestion:
+      "Only one answer per student per question is stored.",
     runsCount: "{{count}} AI runs",
     latestAiScore: "Latest AI score",
   },
@@ -211,7 +225,13 @@ const en = {
     allCaughtUp: "All answers in this category are reviewed!",
     remaining: "{{count}} answers remaining",
     answerOf: "Answer {{current}} of {{total}}",
+    selectQuestionFirst: "Select a question first",
+    selectHint: "Pick an exam and a question using the filters above.",
+    uploadFromExamHint: "Upload answer sheets from the exam's detail page.",
+    noAnswers: "No answers have been uploaded for this question yet",
+    openQueue: "Open grading queue",
     openWorkspace: "Open grading workspace",
+    questionFilter: "Question",
     questionCol: "Question",
     studentCol: "Student",
     aiScoreCol: "AI score",
@@ -259,6 +279,10 @@ const en = {
     newScore: "New score",
     reason: "Reason for change",
     reasonPlaceholder: "e.g. The second criterion is fully satisfied.",
+    latestAiResult: "Latest AI result",
+    diff: "Difference",
+    accept: "Accept",
+    openWorkspace: "Open workspace",
     noteOptional: "Note (optional)",
     acceptTitle: "Accept AI score",
     acceptConfirm: "This will record the AI score as the final teacher score:",
@@ -280,6 +304,7 @@ const en = {
     hideRawResponse: "Hide raw response",
   },
   viewer: {
+    answerScan: "Answer sheet",
     zoomIn: "Zoom in",
     zoomOut: "Zoom out",
     fitScreen: "Fit to screen",
@@ -291,6 +316,7 @@ const en = {
   runs: {
     subtitle: "Each run is an independent AI evaluation",
   },
+
   grading: {
     valid: "Valid",
     invalid: "Invalid",
@@ -310,6 +336,9 @@ const en = {
     numberOfRuns: "Number of runs",
     runsHint:
       "Runs the grader multiple times, keeping every result (1–10)",
+    blindGradingNote:
+      "The teacher's score is never sent to the AI service",
+    runs: "Number of runs",
     estimatedCostNote:
       "Cost is computed after the run from actual token usage.",
     startGrading: "Start grading",
@@ -363,6 +392,8 @@ const en = {
     noEntries: "No activity recorded yet",
     noEntriesHint: "System operations will appear here as audit entries.",
     entriesCount: "{{count}} entries",
+    userId: "User ID",
+    details: "Details",
   },
   settings: {
     title: "Settings",
