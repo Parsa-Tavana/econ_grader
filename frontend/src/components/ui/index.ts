@@ -7,5 +7,6 @@ export {
   EmptyState,
   ErrorState,
   friendlyError,
+  traceIdOf,
 } from "./Feedback";
 export { Dialog, ConfirmDialog } from "./Dialog";

@@ -16,6 +16,7 @@ import {
   ErrorState,
   EmptyState,
   friendlyError,
+  traceIdOf,
 } from "../components/ui";
 import { AnswerStatusBadge } from "../components/common";
 import { formatScore } from "../utils/format";
@@ -130,7 +131,10 @@ export default function QueuePage() {
       ) : answersQ.isLoading ? (
         <LoadingBlock />
       ) : answersQ.isError ? (
-        <ErrorState message={friendlyError(answersQ.error, t)} onRetry={() => answersQ.refetch()} />
+        <ErrorState
+          message={`${friendlyError(answersQ.error, t)}${traceIdOf(answersQ.error) ? ` — ${t("common.traceId")}: ${traceIdOf(answersQ.error)}` : ""}`}
+          onRetry={() => answersQ.refetch()}
+        />
       ) : !filtered.length ? (
         <Card>
           <EmptyState title={t("queue.noAnswers")} hint={t("queue.uploadFromExamHint")} />

@@ -65,3 +65,13 @@ export function friendlyError(err: unknown, t: (k: string) => string): string {
   if (raw === "NETWORK_ERROR") return t("common.networkError");
   return raw || t("states.errorOccurred");
 }
+
+/**
+ * Extracts the backend correlation ID from an axios error response
+ * (body.traceId or X-Correlation-Id header) so the UI can show it and a
+ * developer can grep the server logs for that exact ID.
+ */
+export function traceIdOf(err: unknown): string | null {
+  const e = err as { response?: { data?: { traceId?: string }; headers?: Record<string, string> } } | null;
+  return e?.response?.data?.traceId ?? e?.response?.headers?.["x-correlation-id"] ?? null;
+}

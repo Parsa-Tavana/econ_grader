@@ -106,6 +106,9 @@ try
     var app = builder.Build();
 
     // ── Pipeline ─────────────────────────────────────────────────────────────
+    // Correlation ID first so every downstream log line and error payload
+    // can carry it (frontend shows it on failures for easy tracing).
+    app.UseMiddleware<CorrelationIdMiddleware>();
     app.UseSerilogRequestLogging();
     // Single place translating exceptions → HTTP problem responses.
     app.UseMiddleware<ExceptionHandlingMiddleware>();

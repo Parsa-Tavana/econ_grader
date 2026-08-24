@@ -21,6 +21,11 @@ WORKDIR /app
 
 # Non-root user
 RUN adduser --disabled-password --gecos "" appuser && chown -R appuser /app
+# Pre-create the shared answer-image storage root with appuser ownership.
+# The named volume seeded from here must be writable by appuser — otherwise
+# LocalFileStorage's Directory.CreateDirectory fails with
+# UnauthorizedAccessException at DI time (surfaced as a misleading 403).
+RUN mkdir -p /srv/storage/images && chown -R appuser /srv/storage
 USER appuser
 
 COPY --from=build /app/publish .

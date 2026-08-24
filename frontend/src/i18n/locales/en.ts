@@ -55,6 +55,7 @@ const en = {
     of: "of",
     viewDetails: "View details",
     refresh: "Refresh",
+    traceId: "Trace ID",
   },
   dashboard: {
     title: "Dashboard",

@@ -55,6 +55,7 @@ const fa = {
     of: "از",
     viewDetails: "مشاهده جزئیات",
     refresh: "به‌روزرسانی",
+    traceId: "کد پیگیری",
   },
   dashboard: {
     title: "داشبورد",

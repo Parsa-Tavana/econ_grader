@@ -16,8 +16,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ ./app/
 COPY pricing.json ./
 
-# Non-root user
-RUN useradd --create-home appuser && chown -R appuser /srv
+# Non-root user. /srv/storage is the SHARED answer-image volume (mounted by
+# compose); pre-own it so writes succeed when the volume is first seeded.
+RUN useradd --create-home appuser && chown -R appuser /srv && mkdir -p /srv/storage/images && chown -R appuser /srv/storage
 USER appuser
 
 EXPOSE 5001
