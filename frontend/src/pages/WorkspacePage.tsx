@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   Bot,
@@ -13,14 +13,17 @@ import {
   getAnswer,
   getAnswerImageUrl,
   setTeacherScore as apiSetTeacherScore,
+  listAnswersByQuestion,
 } from "../api/answers";
 import { getQuestion, getActiveRubric } from "../api/questions";
 import {
   runGrading,
   listRunsForAnswer,
+  listReviewsForAnswer,
   acceptRun,
   overrideRun,
 } from "../api/grading";
+import type { TeacherReviewDto } from "../types/models";
 import { getUserId, isValidGuid, setUserId } from "../api/client";
 import type { GradingRun } from "../types/models";
 import { parseCriteriaScores } from "../types/models";
@@ -49,6 +52,7 @@ export default function WorkspacePage() {
   const lang = currentLang();
   const qc = useQueryClient();
   const toast = useToast();
+  const navigate = useNavigate();
 
   const answerQ = useQuery({ queryKey: ["answer", answerId], queryFn: () => getAnswer(answerId) });
   const questionQ = useQuery({
@@ -66,6 +70,24 @@ export default function WorkspacePage() {
     queryKey: ["runs", answerId],
     queryFn: () => listRunsForAnswer(answerId),
   });
+  const reviewsQ = useQuery({
+    queryKey: ["reviews", answerId],
+    queryFn: () => listReviewsForAnswer(answerId),
+  });
+
+  // Sibling answers of the same question → prev/next navigation
+  const siblingsQ = useQuery({
+    queryKey: ["answers", "question", answerQ.data?.questionId],
+    queryFn: () => listAnswersByQuestion(answerQ.data!.questionId),
+    enabled: !!answerQ.data?.questionId,
+  });
+  const siblings = useMemo(
+    () => [...(siblingsQ.data ?? [])].sort((a, b) => a.studentExternalId.localeCompare(b.studentExternalId)),
+    [siblingsQ.data]
+  );
+  const idx = siblings.findIndex((a) => a.id === answerId);
+  const prevAnswer = idx > 0 ? siblings[idx - 1] : null;
+  const nextAnswer = idx >= 0 && idx < siblings.length - 1 ? siblings[idx + 1] : null;
 
   // grading controls
   const [provider, setProvider] = useState("");
@@ -308,6 +330,32 @@ export default function WorkspacePage() {
                   </details>
                 ) : null}
 
+                {/* Raw model response + token usage — full audit trail */}
+                {latestValid.rawAiResponse ? (
+                  <details className="mt-3 rounded-xl border border-zinc-200 p-3 text-sm">
+                    <summary className="cursor-pointer font-medium text-zinc-700">
+                      {t("workspace.showRawResponse")}
+                    </summary>
+                    <pre className="ltr-token mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all text-xs text-zinc-500">
+                      {latestValid.rawAiResponse}
+                    </pre>
+                  </details>
+                ) : null}
+                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-zinc-400 ltr-token">
+                  <span>
+                    {t("workspace.inputTokens")}: {formatNumber(latestValid.inputTokens, lang)}
+                  </span>
+                  <span>
+                    {t("workspace.outputTokens")}: {formatNumber(latestValid.outputTokens, lang)}
+                  </span>
+                  <span>
+                    {t("workspace.estimatedCost")}: {formatCost(latestValid.estimatedCost, lang)}
+                  </span>
+                  <span title={formatDateTime(latestValid.createdAt, lang)}>
+                    {timeAgo(latestValid.createdAt, lang)}
+                  </span>
+                </div>
+
                 <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-100 pt-4">
                   <Button onClick={() => openReview("accept")}>
                     <Check size={15} /> {t("workspace.accept")}
@@ -394,17 +442,62 @@ export default function WorkspacePage() {
               </ul>
             )}
           </Card>
+
+          {/* Review history (append-only) */}
+          <Card>
+            <CardHeader title={t("workspace.reviewHistory")} />
+            {reviewsQ.isLoading ? (
+              <LoadingBlock />
+            ) : !(reviewsQ.data ?? []).length ? (
+              <p className="py-6 text-center text-sm text-zinc-400">{t("workspace.noReviewHistory")}</p>
+            ) : (
+              <ul className="divide-y divide-zinc-100">
+                {(reviewsQ.data ?? []).map((rv: TeacherReviewDto) => (
+                  <li key={rv.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5 text-xs">
+                    <Badge tone={rv.action === "Accept" ? "green" : "amber"}>
+                      {rv.action === "Accept" ? t("workspace.acceptedBy") : t("workspace.overriddenBy")}
+                    </Badge>
+                    <strong className="tabular-nums">{formatScore(rv.newScore, lang)}</strong>
+                    <span className="text-zinc-400">
+                      ({t("workspace.aiScore")} {formatScore(rv.oldAiScore, lang)})
+                    </span>
+                    {rv.note ? <span className="min-w-0 flex-1 truncate text-zinc-500" title={rv.note}>{rv.note}</span> : null}
+                    <span className="flex-1" />
+                    <span className="text-zinc-400" title={formatDateTime(rv.reviewedAt, lang)}>
+                      {timeAgo(rv.reviewedAt, lang)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
         </div>
       </div>
 
-      {/* nav footer */}
-      <div className="mt-6 flex items-center justify-between">
+      {/* nav footer: prev / queue / next — keeps student order stable */}
+      <div className="mt-6 flex items-center justify-between gap-3">
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={!prevAnswer}
+          onClick={() => prevAnswer && navigate(`/grading/workspace/${prevAnswer.id}`)}
+        >
+          ← {t("workspace.prevAnswer")}
+        </Button>
         <Link
           to="/grading/queue"
-          className="inline-flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-primary-600 rtl:flex-row-reverse"
+          className="text-xs font-medium text-zinc-500 hover:text-primary-600"
         >
           {t("queue.title")}
         </Link>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={!nextAnswer}
+          onClick={() => nextAnswer && navigate(`/grading/workspace/${nextAnswer.id}`)}
+        >
+          {t("workspace.nextAnswer")} →
+        </Button>
       </div>
 
       {/* Accept / Override dialog */}

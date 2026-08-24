@@ -40,3 +40,10 @@ export async function getReviewHistory(runId: string): Promise<TeacherReviewDto[
   const { data } = await api.get<TeacherReviewDto[]>(`/grading/${runId}/review/history`);
   return data;
 }
+
+/** All reviews across every run of one answer (client-side join). */
+export async function listReviewsForAnswer(answerId: string): Promise<TeacherReviewDto[]> {
+  const runs = await listRunsForAnswer(answerId);
+  const histories = await Promise.all(runs.map((r) => getReviewHistory(r.id).catch(() => [])));
+  return histories.flat().sort((a, b) => +new Date(b.reviewedAt) - +new Date(a.reviewedAt));
+}
