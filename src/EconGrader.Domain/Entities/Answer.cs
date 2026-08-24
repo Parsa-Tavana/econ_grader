@@ -16,8 +16,13 @@ public class Answer
     public Student Student { get; set; } = null!;
     public Guid QuestionId { get; set; }
     public Question Question { get; set; } = null!;
-    /// <summary>Relative storage key (e.g. answers/2026/…/page1.png).</summary>
+    /// <summary>Relative storage key (e.g. answers/{questionId}/{studentId}/file.ext).
+    /// Supports PNG/JPG/PDF/DOCX; legacy rows contain images only.</summary>
     public string ImageStorageKey { get; set; } = null!;
+    /// <summary>Original file name shown to the user.</summary>
+    public string? FileName { get; set; }
+    /// <summary>MIME type of the stored file (image/png, application/pdf, …).</summary>
+    public string? ContentType { get; set; }
     /// <summary>Teacher's ground-truth score — NEVER sent to the AI.</summary>
     public decimal? TeacherScore { get; set; }
     /// <summary>Second independent teacher score, for human-human ceiling metrics.</summary>

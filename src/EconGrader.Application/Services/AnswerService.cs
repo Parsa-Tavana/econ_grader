@@ -85,6 +85,7 @@ public sealed class AnswerService : IAnswerService
         a.Id, a.StudentId,
         a.Student?.ExternalId ?? a.StudentId.ToString(),
         a.QuestionId, a.ImageStorageKey,
+        a.FileName, a.ContentType,
         a.TeacherScore, a.Teacher2Score, a.UploadedAt,
         a.GradingRuns.Select(r => new GradingRunSummaryDto(
             r.Id, r.Provider, r.ModelName, r.PromptVersion,

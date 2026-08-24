@@ -63,8 +63,19 @@ public sealed class GradingOrchestrationService : IGradingOrchestrationService
             ?? throw new NotFoundException(nameof(Answer), answerId);
 
         var rubric = await GetActiveRubricAsync(answer.QuestionId, ct);
-        var questionImageKey = $"questions/{answer.Question.ExamId}/q{answer.Question.Number}.png";
-        var questionImagePath = _storage.Exists(questionImageKey) ? _storage.GetAbsolutePath(questionImageKey) : null;
+
+        // Attach every stored file that exists on disk. The Python service /
+        // provider layer decides how to represent each (image vs rendered
+        // pages vs extracted text) based on its own capabilities.
+        var filePaths = new List<string>();
+        void AddIfPresent(string? key)
+        {
+            if (!string.IsNullOrEmpty(key) && _storage.Exists(key))
+                filePaths.Add(_storage.GetAbsolutePath(key));
+        }
+        AddIfPresent(answer.Question.FileStorageKey);   // question paper
+        AddIfPresent(rubric.FileStorageKey);            // rubric document
+        AddIfPresent(answer.ImageStorageKey);           // student answer
 
         var request = new GradingServiceRequest(
             StudentId: answer.Student.ExternalId,
@@ -73,12 +84,18 @@ public sealed class GradingOrchestrationService : IGradingOrchestrationService
             Rubric: new GradingRubricDto(rubric.Criteria.Select(c =>
                 new GradingCriterionDto(c.CriterionId, c.Description, c.MaxScore)).ToList()),
             AnswerImagePaths: new[] { _storage.GetAbsolutePath(answer.ImageStorageKey) },
-            QuestionImagePaths: questionImagePath is null ? Array.Empty<string>() : new[] { questionImagePath },
+            // All supporting documents (question paper + rubric doc) ride along;
+            // the grading service routes them to the AI per provider capability.
+            QuestionImagePaths: filePaths.Where(p => p != _storage.GetAbsolutePath(answer.ImageStorageKey)).ToArray(),
             MaxScore: answer.Question.MaxScore,
             Temperature: temperature,
             PromptVersion: promptVersion,
             Provider: provider
         );
+
+        _logger.LogInformation(
+            "Grading request prepared AnswerId={AnswerId} Files={FileCount} Provider={Provider}",
+            answerId, filePaths.Count, provider ?? "default");
 
         // CRITICAL: teacher score is NEVER sent — only AI's independent view.
         var response = await _gradingClient.GradeAsync(request, ct);

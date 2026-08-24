@@ -18,6 +18,8 @@ public record AnswerDto(
     string StudentExternalId,
     Guid QuestionId,
     string ImageStorageKey,
+    string? FileName,
+    string? ContentType,
     decimal? TeacherScore,
     decimal? Teacher2Score,
     DateTime UploadedAt,

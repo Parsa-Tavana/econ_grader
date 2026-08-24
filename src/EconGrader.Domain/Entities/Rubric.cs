@@ -9,6 +9,10 @@ public class Rubric
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public Guid CreatedByUserId { get; set; }
+    /// <summary>Optional stored rubric document (PDF/PNG/JPG/DOCX).</summary>
+    public string? FileStorageKey { get; set; }
+    public string? FileName { get; set; }
+    public string? ContentType { get; set; }
     public ICollection<RubricCriterion> Criteria { get; set; } = new List<RubricCriterion>();
     public decimal TotalMaxScore => Criteria.Sum(c => c.MaxScore);
 }

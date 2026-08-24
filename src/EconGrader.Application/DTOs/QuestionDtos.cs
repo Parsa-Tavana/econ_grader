@@ -6,7 +6,9 @@ public record QuestionDto(
     int Number,
     string Text,
     decimal MaxScore,
-    string? RubricText
+    string? RubricText,
+    string? FileName = null,
+    string? ContentType = null
 );
 
 public record CreateQuestionRequest(
@@ -31,7 +33,9 @@ public record RubricDto(
     bool IsActive,
     DateTime CreatedAt,
     decimal TotalMaxScore,
-    IReadOnlyList<RubricCriterionDto> Criteria
+    IReadOnlyList<RubricCriterionDto> Criteria,
+    string? FileName = null,
+    string? ContentType = null
 );
 
 public record CreateRubricRequest(
