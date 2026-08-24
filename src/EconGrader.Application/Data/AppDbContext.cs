@@ -40,6 +40,8 @@ public sealed class AppDbContext : DbContext, IAppDbContext
         {
             e.HasOne(x => x.Exam).WithMany(x => x.Questions).HasForeignKey(x => x.ExamId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => new { x.ExamId, x.Number }).IsUnique();
+            e.Property(x => x.FileName).HasMaxLength(260);
+            e.Property(x => x.ContentType).HasMaxLength(128);
         });
 
         // Rubric
@@ -47,6 +49,8 @@ public sealed class AppDbContext : DbContext, IAppDbContext
         {
             e.HasOne(x => x.Question).WithMany(x => x.Rubrics).HasForeignKey(x => x.QuestionId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => new { x.QuestionId, x.Version }).IsUnique();
+            e.Property(x => x.FileName).HasMaxLength(260);
+            e.Property(x => x.ContentType).HasMaxLength(128);
         });
 
         // RubricCriterion
@@ -68,6 +72,8 @@ public sealed class AppDbContext : DbContext, IAppDbContext
             e.HasOne(x => x.Student).WithMany(x => x.Answers).HasForeignKey(x => x.StudentId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(x => x.Question).WithMany(x => x.Answers).HasForeignKey(x => x.QuestionId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => new { x.StudentId, x.QuestionId }).IsUnique();
+            e.Property(x => x.FileName).HasMaxLength(260);
+            e.Property(x => x.ContentType).HasMaxLength(128);
         });
 
         // GradingRun - THE core entity
