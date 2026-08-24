@@ -56,6 +56,18 @@ const en = {
     viewDetails: "View details",
     refresh: "Refresh",
     traceId: "Trace ID",
+    download: "Download",
+  },
+  files: {
+    questionLabel: "Question paper",
+    rubricLabel: "Rubric document",
+    answerLabel: "Student answer",
+    upload: "Upload file",
+    replace: "Replace",
+    uploaded: "File uploaded successfully",
+    removed: "File removed",
+    unsupportedType: "Unsupported file type ({{type}}) — use PDF, PNG, JPG or DOCX",
+    tooLarge: "File is larger than 20 MB",
   },
   dashboard: {
     title: "Dashboard",

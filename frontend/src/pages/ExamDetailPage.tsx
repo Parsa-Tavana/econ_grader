@@ -23,6 +23,15 @@ import {
 } from "../api/questions";
 import { listAnswersByQuestion } from "../api/answers";
 import { uploadAnswer } from "../api/answers";
+import {
+  uploadQuestionFile,
+  deleteQuestionFile,
+  questionFileUrl,
+  uploadRubricFile,
+  deleteRubricFile,
+  rubricFileUrl,
+} from "../api/questions";
+import { FileAttachment } from "../components/FileAttachment";
 import { listStudents, createStudent } from "../api/students";
 import {
   PageHeader,
@@ -333,6 +342,24 @@ function QuestionCard({
     }
   }
 
+  // ── Question / Rubric document handlers (delegated to FileAttachment) ──
+  async function handleQuestionFile(file: File) {
+    await uploadQuestionFile(question.id, file);
+    await qc.invalidateQueries({ queryKey: ["questions", question.examId] });
+  }
+  async function handleDeleteQuestionFile() {
+    await deleteQuestionFile(question.id);
+    await qc.invalidateQueries({ queryKey: ["questions", question.examId] });
+  }
+  async function handleRubricFile(file: File) {
+    await uploadRubricFile(question.id, file);
+    await qc.invalidateQueries({ queryKey: ["rubric", question.id] });
+  }
+  async function handleDeleteRubricFile() {
+    await deleteRubricFile(question.id);
+    await qc.invalidateQueries({ queryKey: ["rubric", question.id] });
+  }
+
   return (
     <Card>
       <div className="mb-2 flex items-start justify-between gap-2">
@@ -349,6 +376,27 @@ function QuestionCard({
       </div>
 
       <p className="mb-3 line-clamp-3 text-sm text-zinc-600">{question.text}</p>
+
+      {/* Role-labeled attachments: clearly distinguish Question vs Rubric */}
+      <div className="mb-3 grid gap-2 sm:grid-cols-2">
+        <FileAttachment
+          label={t("files.questionLabel")}
+          fileName={question.fileName ?? null}
+          contentType={question.contentType ?? null}
+          fileUrl={question.fileName ? questionFileUrl(question.id) : null}
+          onUpload={handleQuestionFile}
+          onDelete={handleDeleteQuestionFile}
+        />
+        <FileAttachment
+          label={t("files.rubricLabel")}
+          fileName={rubricQ.data?.fileName ?? null}
+          contentType={rubricQ.data?.contentType ?? null}
+          fileUrl={rubricQ.data?.fileName ? rubricFileUrl(question.id) : null}
+          onUpload={handleRubricFile}
+          onDelete={handleDeleteRubricFile}
+        />
+      </div>
+
       {rubricQ.data ? (
         <ul className="mb-3 space-y-1 rounded-lg bg-zinc-50 p-2.5 text-xs text-zinc-600">
           {rubricQ.data.criteria.map((c) => (
@@ -374,7 +422,7 @@ function QuestionCard({
         >
           <Upload size={13} />
           {uploading ? t("answers.uploading") : t("answers.uploadAnswer")}
-          <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={handleUpload} disabled={uploading} />
+          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.docx" className="hidden" onChange={handleUpload} disabled={uploading} />
         </label>
         <Link to={`/grading/queue?questionId=${question.id}`} className="text-xs font-medium text-primary-600 hover:underline">
           {t("queue.openQueue")} ({formatNumber(answersQ.data?.length ?? 0, lang)})

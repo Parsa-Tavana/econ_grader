@@ -56,6 +56,18 @@ const fa = {
     viewDetails: "مشاهده جزئیات",
     refresh: "به‌روزرسانی",
     traceId: "کد پیگیری",
+    download: "دانلود",
+  },
+  files: {
+    questionLabel: "فایل سؤال",
+    rubricLabel: "سند معیار تصحیح",
+    answerLabel: "پاسخ دانش‌آموز",
+    upload: "بارگذاری فایل",
+    replace: "جایگزینی",
+    uploaded: "فایل با موفقیت بارگذاری شد",
+    removed: "فایل حذف شد",
+    unsupportedType: "نوع فایل ({{type}}) پشتیبانی نمی‌شود — از PDF، PNG، JPG یا DOCX استفاده کنید",
+    tooLarge: "حجم فایل بیش از ۲۰ مگابایت است",
   },
   dashboard: {
     title: "داشبورد",

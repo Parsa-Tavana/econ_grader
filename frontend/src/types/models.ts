@@ -28,6 +28,8 @@ export interface QuestionDto {
   text: string;
   maxScore: number;
   rubricText?: string | null;
+  fileName?: string | null;
+  contentType?: string | null;
 }
 
 export interface CreateQuestionRequest {
@@ -52,6 +54,8 @@ export interface RubricDto {
   isActive: boolean;
   createdAt: string;
   totalMaxScore: number;
+  fileName?: string | null;
+  contentType?: string | null;
   criteria: RubricCriterionDto[];
 }
 
@@ -93,6 +97,8 @@ export interface AnswerDto {
   studentExternalId: string;
   questionId: string;
   imageStorageKey: string;
+  fileName?: string | null;
+  contentType?: string | null;
   teacherScore?: number | null;
   teacher2Score?: number | null;
   uploadedAt: string;
