@@ -41,19 +41,26 @@ class GradingResult:
 
 class IVisionGrader(ABC):
     """Abstract base for all vision graders. Implementations MUST NOT leak
-    teacher scores or rubric internals beyond what's in the prompt."""
+    teacher scores or rubric internals beyond what's in the prompt.
+
+    Images arrive as (bytes, media_type) pairs already converted by
+    app.attachments (PDFs rendered to page PNGs, correct MIME types).
+    `extra_text` carries extracted document text (DOCX) that must be
+    included in the prompt before grading.
+    """
 
     @abstractmethod
     def grade(
         self,
         *,
         question_text: str,
-        question_images: list[bytes],
+        question_images: list[tuple[bytes, str]],
         rubric: dict[str, Any],
-        answer_images: list[bytes],
+        answer_images: list[tuple[bytes, str]],
         max_score: float,
         temperature: float,
         prompt_version: str,
+        extra_text: str = "",
     ) -> GradingResult:
         """Grade one student answer against one question + rubric.
 

@@ -22,6 +22,7 @@ from .config import settings
 from .graders.factory import get_grader
 from .schemas import GradeRequest, GradeResponse, CriterionOut, HealthResponse, EvaluationRequest
 from .validation import validate_grading_response, parse_json_safe
+from .attachments import prepare_attachments
 from .cost import estimate_cost
 from .prompts.loader import list_prompt_versions, load_prompt
 from .evaluation import compute_metrics, aggregate_by_provider
@@ -101,30 +102,28 @@ def get_prompt(version: str):
 
 @app.post("/grade", response_model=GradeResponse, tags=["grading"])
 async def grade(req: GradeRequest):
-    """Grade one handwritten answer. Teacher score is NEVER required or used."""
+    """Grade one handwritten/typed answer. Teacher score is NEVER required or used."""
     t0 = time.time()
     provider = req.provider or settings.MODEL_PROVIDER
 
-    answer_images: list[bytes] = []
-    question_images: list[bytes] = []
-    for p in req.answer_image_paths:
-        path = Path(p)
-        if not path.exists():
+    # Convert every attachment (PDF → page PNGs, DOCX → text, PNG/JPG → pass-through).
+    for p in [*req.answer_image_paths, *req.question_image_paths]:
+        if not Path(p).exists():
             raise HTTPException(status_code=422, detail={
                 "stage": "image_load",
                 "file": p,
-                "error": "Answer image file not found",
+                "error": "Answer file not found",
             })
-        answer_images.append(path.read_bytes())
-    for p in req.question_image_paths:
-        path = Path(p)
-        if not path.exists():
-            logger.warning('{"event":"question_image_missing","path":"%s"}' % p)
-            continue
-        question_images.append(path.read_bytes())
 
-    if not answer_images:
-        raise HTTPException(status_code=422, detail="No answer images provided or all files missing")
+    try:
+        prep = prepare_attachments(req.answer_image_paths, req.question_image_paths)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    # A typed DOCX answer legitimately has zero images — its content arrives
+    # as extracted text. Only fail when there is nothing to grade at all.
+    if not prep.answer_images and not prep.extra_text.strip():
+        raise HTTPException(status_code=422, detail="No usable answer files provided")
 
     try:
         grader = get_grader(provider)
@@ -134,12 +133,13 @@ async def grade(req: GradeRequest):
     rubric_dict = {"criteria": [c.model_dump() for c in req.rubric.criteria]}
     result = grader.grade(
         question_text=req.question_text,
-        question_images=question_images,
+        question_images=prep.question_images,
         rubric=rubric_dict,
-        answer_images=answer_images,
+        answer_images=prep.answer_images,
         max_score=req.max_score,
         temperature=req.temperature,
         prompt_version=req.prompt_version,
+        extra_text=prep.extra_text,
     )
 
     latency_ms = result.latency_ms or int((time.time() - t0) * 1000)
@@ -165,7 +165,7 @@ async def grade(req: GradeRequest):
         provider=provider.lower(),
         input_tokens=result.input_tokens,
         output_tokens=result.output_tokens,
-        num_images=len(answer_images) + len(question_images),
+        num_images=len(prep.answer_images) + len(prep.question_images),
     )
 
     resp = GradeResponse(

@@ -27,7 +27,9 @@ public interface IGradingOrchestrationService
         string? provider = null,
         CancellationToken ct = default);
 
-    Task<IReadOnlyList<GradingRun>> GetRunsForAnswerAsync(Guid answerId, CancellationToken ct = default);
+    /// <summary>Trimmed runs (no RawAiResponse) for list/timeline views.</summary>
+    Task<IReadOnlyList<GradingRunSummaryDetailDto>> GetRunsForAnswerAsync(Guid answerId, CancellationToken ct = default);
+    /// <summary>Full run including RawAiResponse.</summary>
     Task<GradingRun?> GetRunAsync(Guid runId, CancellationToken ct = default);
 }
 
@@ -146,11 +148,15 @@ public sealed class GradingOrchestrationService : IGradingOrchestrationService
         return new EnsembleResult(new[] { run }, run.IsValid ? 1 : 0, run.AiScore);
     }
 
-    public async Task<IReadOnlyList<GradingRun>> GetRunsForAnswerAsync(Guid answerId, CancellationToken ct = default) =>
-        await _db.GradingRuns
+    public async Task<IReadOnlyList<GradingRunSummaryDetailDto>> GetRunsForAnswerAsync(Guid answerId, CancellationToken ct = default)
+    {
+        var runs = await _db.GradingRuns
             .Where(r => r.AnswerId == answerId)
             .OrderBy(r => r.CreatedAt)
             .ToListAsync(ct);
+        // RawAiResponse excluded from listings — fetch GET /api/grading/run/{id} for it.
+        return runs.Select(GradingRunSummaryDetailDto.From).ToList();
+    }
 
     public Task<GradingRun?> GetRunAsync(Guid runId, CancellationToken ct = default) =>
         _db.GradingRuns.FirstOrDefaultAsync(r => r.Id == runId, ct);

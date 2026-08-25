@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import {
   Bot,
   Check,
+  FileText,
   Pencil,
   Play,
   ShieldCheck,
@@ -222,12 +223,31 @@ export default function WorkspacePage() {
             ) : null}
           </div>
           <div className="overflow-hidden rounded-xl bg-zinc-100">
-            <img
-              src={getAnswerImageUrl(answer.id)}
-              alt={`${t("viewer.answerScan")} — ${answer.studentExternalId}`}
-              className="max-h-[560px] w-full object-contain"
-              loading="lazy"
-            />
+            {answer.contentType === "application/pdf" ? (
+              <iframe
+                src={getAnswerImageUrl(answer.id)}
+                title={`${t("viewer.answerScan")} — ${answer.studentExternalId}`}
+                className="h-[560px] w-full"
+              />
+            ) : answer.contentType ===
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ? (
+              <div className="flex h-40 flex-col items-center justify-center gap-2 text-sm text-zinc-500">
+                <FileText size={22} className="text-red-400" />
+                <span>{answer.fileName ?? t("viewer.answerScan")}</span>
+                <a href={getAnswerImageUrl(answer.id)} target="_blank" rel="noreferrer">
+                  <Button size="sm" variant="secondary">
+                    {t("common.download")}
+                  </Button>
+                </a>
+              </div>
+            ) : (
+              <img
+                src={getAnswerImageUrl(answer.id)}
+                alt={`${t("viewer.answerScan")} — ${answer.studentExternalId}`}
+                className="max-h-[560px] w-full object-contain"
+                loading="lazy"
+              />
+            )}
           </div>
           {question ? (
             <details className="mt-3 rounded-xl border border-zinc-200 p-3 text-sm">

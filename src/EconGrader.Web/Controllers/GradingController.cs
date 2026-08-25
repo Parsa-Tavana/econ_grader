@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using EconGrader.Application.DTOs;
 using EconGrader.Application.Interfaces;
 using EconGrader.Application.Services;
 using EconGrader.Domain.Entities;
@@ -32,7 +33,7 @@ public sealed class GradingController : ControllerBase
     }
 
     public sealed record GradeResultDto(
-        IReadOnlyList<GradingRun> Runs,
+        IReadOnlyList<GradingRunSummaryDetailDto> Runs,
         int TotalRuns,
         int ValidRuns,
         decimal? MedianAiScore);
@@ -47,7 +48,7 @@ public sealed class GradingController : ControllerBase
         CancellationToken ct)
     {
         if (request.Runs < 1 || request.Runs > 10)
-            return BadRequest("Runs must be between 1 and 10");
+            return BadRequest(new { code = "INVALID_RUN_COUNT", message = "Runs must be between 1 and 10" });
 
         var allRuns = new List<GradingRun>();
         for (int i = 0; i < request.Runs; i++)
@@ -57,19 +58,22 @@ public sealed class GradingController : ControllerBase
             allRuns.AddRange(result.Runs);
         }
 
+        // Trimmed views — RawAiResponse only via GET /api/grading/run/{id}.
+        var runViews = allRuns.Select(GradingRunSummaryDetailDto.From).ToList();
+
         var validScores = allRuns.Where(r => r.IsValid).Select(r => r.AiScore).OrderBy(s => s).ToList();
         decimal? median = validScores.Count == 0 ? null :
             validScores.Count % 2 == 1
                 ? validScores[validScores.Count / 2]
                 : (validScores[validScores.Count / 2 - 1] + validScores[validScores.Count / 2]) / 2m;
 
-        return Ok(new GradeResultDto(allRuns, allRuns.Count, validScores.Count, median));
+        return Ok(new GradeResultDto(runViews, allRuns.Count, validScores.Count, median));
     }
 
-    /// <summary>All grading runs recorded for one answer.</summary>
+    /// <summary>All grading runs recorded for one answer (trimmed — no RawAiResponse).</summary>
     [HttpGet("answer/{answerId:guid}")]
-    public async Task<ActionResult<IReadOnlyList<GradingRun>>> ListForAnswer(Guid answerId, CancellationToken ct) =>
-        await _orchestrator.GetRunsForAnswerAsync(answerId, ct) is { } runs ? Ok(runs) : Ok(Array.Empty<GradingRun>());
+    public async Task<ActionResult<IReadOnlyList<GradingRunSummaryDetailDto>>> ListForAnswer(Guid answerId, CancellationToken ct) =>
+        Ok(await _orchestrator.GetRunsForAnswerAsync(answerId, ct));
 
     /// <summary>Full detail of a single run including raw AI response and per-criterion scores.</summary>
     [HttpGet("run/{runId:guid}")]

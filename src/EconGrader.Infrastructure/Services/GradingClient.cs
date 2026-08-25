@@ -28,7 +28,9 @@ public sealed class GradingClient : IGradingClient
     {
         _http = http;
         _logger = logger;
-        _json = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        // Python service speaks snake_case (pydantic models without aliases) —
+        // bind ai_score/is_valid/... onto our PascalCase records.
+        _json = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
     }
 
     public async Task<GradingServiceResponse> GradeAsync(GradingServiceRequest request, CancellationToken ct = default)
