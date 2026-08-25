@@ -7,6 +7,7 @@ public interface IAppDbContext
 {
     DbSet<User> Users { get; }
     DbSet<Exam> Exams { get; }
+    DbSet<ExamCorrector> ExamCorrectors { get; }
     DbSet<Question> Questions { get; }
     DbSet<Rubric> Rubrics { get; }
     DbSet<RubricCriterion> RubricCriteria { get; }

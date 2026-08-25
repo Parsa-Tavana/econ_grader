@@ -5,6 +5,10 @@ public class Student
     public Guid Id { get; set; } = Guid.NewGuid();
     public string ExternalId { get; set; } = null!; // e.g. "S001", exam roll number
     public string? DisplayName { get; set; }
+    /// <summary>Optional login identity — one User with Role=Student maps to at
+    /// most one Student row; students without accounts stay NULL.</summary>
+    public Guid? UserId { get; set; }
+    public User? User { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public ICollection<Answer> Answers { get; set; } = new List<Answer>();
 }

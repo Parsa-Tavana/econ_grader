@@ -38,6 +38,8 @@ htmlcov/
 # src/EconGrader.Infrastructure/Storage/ source code on case-insensitive FS.
 /storage/
 /storage/images/
+# same, for local `dotnet run` from the Web project dir
+/src/EconGrader.Web/storage/
 # Serilog output
 logs/
 *.log

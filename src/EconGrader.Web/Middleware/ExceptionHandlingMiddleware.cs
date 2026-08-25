@@ -34,6 +34,7 @@ public sealed class ExceptionHandlingMiddleware
         var (status, code, message) = ex switch
         {
             DomainException de => (de.StatusCode, de.ErrorCode, de.Message),
+            KeyNotFoundException => (404, "NOT_FOUND", ex.Message),
             ArgumentException => (400, "VALIDATION_ERROR", ex.Message),
             // Real authorization failures only. NOTE: filesystem permission
             // problems used to land here via UnauthorizedAccessException and

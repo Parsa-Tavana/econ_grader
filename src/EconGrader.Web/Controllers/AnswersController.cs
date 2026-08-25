@@ -1,47 +1,74 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using EconGrader.Application.DTOs;
 using EconGrader.Application.Interfaces;
 using EconGrader.Application.Services;
+using EconGrader.Domain.Entities;
+using EconGrader.Web.Services;
 
 namespace EconGrader.Web.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public sealed class AnswersController : ControllerBase
 {
     private readonly IAnswerService _svc;
     private readonly IFileStorage _storage;
     private readonly IAppDbContext _db;
     private readonly ILogger<AnswersController> _logger;
+    private readonly CurrentUser _user;
+    private readonly IAccessScopeService _scope;
 
-    public AnswersController(IAnswerService svc, IFileStorage storage, IAppDbContext db, ILogger<AnswersController> logger)
+    public AnswersController(IAnswerService svc, IFileStorage storage, IAppDbContext db,
+        ILogger<AnswersController> logger, CurrentUser user, IAccessScopeService scope)
     {
         _svc = svc;
         _storage = storage;
         _db = db;
         _logger = logger;
+        _user = user;
+        _scope = scope;
     }
 
-    [HttpGet("{id:guid}")]
-    public async Task<ActionResult<AnswerDto>> Get(Guid id, CancellationToken ct) =>
-        await _svc.GetAsync(id, ct) is { } dto ? Ok(dto) : NotFound();
-
-    [HttpGet("by-question/{questionId:guid}")]
-    public async Task<ActionResult<IReadOnlyList<AnswerDto>>> ListByQuestion(Guid questionId, CancellationToken ct) =>
-        Ok(await _svc.ListByQuestionAsync(questionId, ct));
-
     /// <summary>
-    /// Upload a scanned answer sheet (PNG/JPG) for one student + one question.
-    /// The file is stored via IFileStorage; the answer row is created with an
-    /// optional teacher ground-truth score (never exposed to the AI).
+    /// Answer detail. Students may fetch only their own answer; the DTO is
+    /// filtered so they never see teacher ground-truth scores.
     /// </summary>
+    [HttpGet("{id:guid}")]
+    public async Task<ActionResult<AnswerDto>> Get(Guid id, CancellationToken ct)
+    {
+        if (!await _scope.CanAccessAnswerAsync(_user, id, writeAccess: false, ct)) return Forbid();
+        var dto = await _svc.GetAsync(id, ct);
+        if (dto is null) return NotFound();
+        return Ok(_user.IsStudent ? StudentView(dto) : dto);
+    }
+
+    /// <summary>All answers for a question. Correctors read-only on assigned
+    /// exams; students get only their own answer (if any), scores hidden.</summary>
+    [HttpGet("by-question/{questionId:guid}")]
+    public async Task<ActionResult<IReadOnlyList<AnswerDto>>> ListByQuestion(Guid questionId, CancellationToken ct)
+    {
+        if (!await _scope.CanAccessQuestionAsync(_user, questionId, writeAccess: false, ct)) return Forbid();
+        var list = await _svc.ListByQuestionAsync(questionId, ct);
+
+        if (_user.IsStudent)
+        {
+            // Resolve the caller's Student row; hide teacher scores on it.
+            var studentId = (await _db.Students.FirstOrDefaultAsync(s => s.UserId == _user.UserId, ct))?.Id;
+            return Ok(list.Where(a => a.StudentId == studentId).Select(StudentView).ToList());
+        }
+        return Ok(list);
+    }
+
     /// <summary>
     /// Upload a scanned/typed answer sheet (PNG/JPG/PDF/DOCX/XLSX/XLS, ≤20 MB) for one
     /// student + one question. Stored via IFileStorage; optional teacher
-    /// ground-truth scores are never exposed to the AI.
+    /// ground-truth scores are never exposed to the AI. Teachers only.
     /// </summary>
     [HttpPost("upload")]
+    [Authorize(Roles = nameof(UserRole.Teacher))]
     [RequestSizeLimit(FileUploadValidator.MaxBytes)]
     public async Task<ActionResult<AnswerDto>> Upload(
         [FromForm] Guid studentId,
@@ -51,6 +78,8 @@ public sealed class AnswersController : ControllerBase
         IFormFile file,
         CancellationToken ct)
     {
+        if (!await _scope.CanAccessQuestionAsync(_user, questionId, writeAccess: true, ct))
+            return Forbid();
         if (file.Length == 0) return BadRequest(new { code = "EMPTY_FILE", message = "Empty file" });
         var ext = FileUploadValidator.ExtensionForFile(file.ContentType, file.FileName);
         if (ext is null)
@@ -107,6 +136,8 @@ public sealed class AnswersController : ControllerBase
     [HttpGet("{id:guid}/image")]
     public async Task<IActionResult> GetImage(Guid id, CancellationToken ct)
     {
+        if (!await _scope.CanAccessAnswerAsync(_user, id, writeAccess: false, ct)) return Forbid();
+
         var dto = await _svc.GetAsync(id, ct);
         if (dto is null) return NotFound();
 
@@ -132,13 +163,53 @@ public sealed class AnswersController : ControllerBase
             inline ? null : dto.FileName ?? $"answer-{id}");
     }
 
-    /// <summary>Set/adjust the teacher ground-truth score after AI grading.</summary>
+    /// <summary>
+    /// Set ground-truth score. Teachers set TeacherScore (+ optionally
+    /// Teacher2Score). Correctors may ONLY set Teacher2Score — pass a body with
+    /// teacher2Score and score omitted/null; attempts to touch TeacherScore are rejected.
+    /// </summary>
     [HttpPut("{id:guid}/teacher-score")]
     public async Task<ActionResult<AnswerDto>> SetTeacherScore(
         Guid id,
         [FromBody] SetTeacherScoreRequest request,
-        CancellationToken ct) =>
-        Ok(await _svc.SetTeacherScoreAsync(id, request.Score, request.Teacher2Score, ct));
+        CancellationToken ct)
+    {
+        if (_user.IsTeacher || _user.IsAdmin)
+        {
+            if (!request.Score.HasValue)
+                return BadRequest(new { code = "SCORE_REQUIRED", message = "Teachers must provide 'score'" });
+            if (!await _scope.CanAccessAnswerAsync(_user, id, writeAccess: true, ct)) return Forbid();
+            return Ok(await _svc.SetTeacherScoreAsync(id, request.Score.Value, request.Teacher2Score, ct));
+        }
+
+        if (_user.IsCorrector)
+        {
+            // Independence by construction: a corrector never writes the first rater's score.
+            if (request.Score.HasValue)
+                return StatusCode(403, new { code = "CORRECTOR_SCORE_FORBIDDEN", message = "Correctors may only set teacher2Score — 'score' must be null" });
+            if (!request.Teacher2Score.HasValue)
+                return BadRequest(new { code = "EMPTY_UPDATE", message = "Provide teacher2Score to update" });
+            if (!await _scope.CanAccessAnswerAsync(_user, id, writeAccess: false, ct)) return Forbid();
+
+            var answer = await _db.Answers.FindAsync([id], ct)
+                ?? throw new KeyNotFoundException($"Answer {id} not found");
+            if (request.Teacher2Score.Value < 0)
+                return BadRequest(new { code = "INVALID_SCORE", message = "Teacher2Score cannot be negative" });
+            answer.Teacher2Score = request.Teacher2Score.Value;
+            await _db.SaveChangesAsync(ct);
+            return Ok(await _svc.GetAsync(id, ct));
+        }
+
+        return Forbid(); // Students (and any future role) never set scores.
+    }
+
+    /// <summary>Student-safe projection: teacher ground-truth scores stripped.</summary>
+    private static AnswerDto StudentView(AnswerDto a) => a with
+    {
+        TeacherScore = null,
+        Teacher2Score = null,
+        GradingRuns = a.GradingRuns.Select(r => r with { TeacherScoreSnapshot = null }).ToList(),
+    };
 }
 
-public record SetTeacherScoreRequest(decimal Score, decimal? Teacher2Score);
+public record SetTeacherScoreRequest(decimal? Score, decimal? Teacher2Score);

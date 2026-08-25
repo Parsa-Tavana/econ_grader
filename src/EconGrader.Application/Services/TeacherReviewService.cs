@@ -60,10 +60,7 @@ public sealed class TeacherReviewService : ITeacherReviewService
         var run = await _db.GradingRuns.FindAsync([runId], ct)
             ?? throw new NotFoundException(nameof(GradingRun), runId);
 
-        // Attribution-only identity: auto-provision placeholder user so the
-        // TeacherReviews.TeacherUserId FK is satisfied for any valid GUID.
-        await _db.EnsureUserAsync(teacherUserId, ct);
-
+        // teacherUserId comes from the validated JWT principal.
         var review = new TeacherReview
         {
             GradingRunId = runId,

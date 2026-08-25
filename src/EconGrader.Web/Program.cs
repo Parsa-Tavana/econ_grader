@@ -1,4 +1,8 @@
+using System.Security.Claims;
+using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 using Serilog;
 using EconGrader.Application.Data;
 using EconGrader.Application.Evaluation;
@@ -7,6 +11,7 @@ using EconGrader.Application.Services;
 using EconGrader.Infrastructure.Services;
 using EconGrader.Infrastructure.Storage;
 using EconGrader.Web.Middleware;
+using EconGrader.Web.Services;
 
 // ── Serilog (from appsettings Serilog: section) ──────────────────────────────
 Log.Logger = new LoggerConfiguration()
@@ -73,6 +78,46 @@ try
     builder.Services.AddScoped<ITeacherReviewService, TeacherReviewService>();
     builder.Services.AddScoped<EvaluationService>();
 
+    // ── Authentication: bearer JWT (identity NEVER from headers) ─────────────
+    // Empty counts as missing: an empty env-var override must never yield a
+    // zero-length HMAC key (tokens signed with it would validate against "").
+    var jwtSigningKey = builder.Configuration["Jwt:SigningKey"];
+    if (string.IsNullOrWhiteSpace(jwtSigningKey))
+        throw new InvalidOperationException(
+            "Missing Jwt:SigningKey. Generate one with: openssl rand -base64 48  (or set JWT_SIGNING_KEY in .env)");
+    var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "econgrader";
+    var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "econgrader-api";
+
+    builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddJwtBearer(options =>
+        {
+            options.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuer = true,
+                ValidIssuer = jwtIssuer,
+                ValidateAudience = true,
+                ValidAudience = jwtAudience,
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSigningKey)),
+                ValidateLifetime = true,
+                ClockSkew = TimeSpan.FromMinutes(1),
+                // Role claim arrives as "role" — map it so [Authorize(Roles=...)] works.
+                RoleClaimType = ClaimTypes.Role,
+                NameClaimType = ClaimTypes.NameIdentifier,
+            };
+        });
+    builder.Services.AddAuthorization();
+    builder.Services.AddSingleton<ITokenService, JwtTokenService>();
+    builder.Services.AddScoped<IAuthService, AuthService>();
+    builder.Services.AddScoped<IAccessScopeService, AccessScopeService>();
+    // Audit rows fall back to this when a service call site has no user id —
+    // keeps every mutation attributed to the real authenticated account.
+    builder.Services.AddScoped<EconGrader.Application.Interfaces.IAuditUserProvider, AuditUserProvider>();
+    builder.Services.AddHttpContextAccessor();
+    builder.Services.AddScoped<CurrentUser>(sp =>
+        CurrentUser.From(sp.GetRequiredService<IHttpContextAccessor>().HttpContext?.User)
+        ?? throw new UnauthorizedAccessException("No authenticated user on request"));
+
     // ── MVC / OpenAPI ────────────────────────────────────────────────────────
     builder.Services.AddControllers()
         .AddJsonOptions(opts =>
@@ -120,6 +165,8 @@ try
 
     app.UseHttpsRedirection();
     app.UseCors();
+    app.UseAuthentication();
+    app.UseAuthorization();
     app.MapControllers();
 
     // Auto-migrate the database at startup (safe: idempotent).

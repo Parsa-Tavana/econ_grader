@@ -10,11 +10,13 @@ namespace EconGrader.Infrastructure.Services;
 public sealed class AuditLogger : IAuditLogger
 {
     private readonly IAppDbContext _db;
+    private readonly IAuditUserProvider? _userProvider;
     private readonly ILogger<AuditLogger> _logger;
 
-    public AuditLogger(IAppDbContext db, ILogger<AuditLogger> logger)
+    public AuditLogger(IAppDbContext db, ILogger<AuditLogger> logger, IAuditUserProvider? userProvider = null)
     {
         _db = db;
+        _userProvider = userProvider;
         _logger = logger;
     }
 
@@ -32,7 +34,9 @@ public sealed class AuditLogger : IAuditLogger
             Action = action,
             EntityType = entityType,
             EntityId = entityId?.ToString(),
-            UserId = userId,
+            // Explicit userId wins; otherwise fall back to the authenticated
+            // actor so service-layer mutations are still attributed.
+            UserId = userId ?? _userProvider?.CurrentUserId,
             Details = details != null ? JsonSerializer.Serialize(details) : null,
             IpAddress = ipAddress,
         };

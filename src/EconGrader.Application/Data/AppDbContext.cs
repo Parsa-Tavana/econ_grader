@@ -10,6 +10,7 @@ public sealed class AppDbContext : DbContext, IAppDbContext
 
     public DbSet<User> Users => Set<User>();
     public DbSet<Exam> Exams => Set<Exam>();
+    public DbSet<ExamCorrector> ExamCorrectors => Set<ExamCorrector>();
     public DbSet<Question> Questions => Set<Question>();
     public DbSet<Rubric> Rubrics => Set<Rubric>();
     public DbSet<RubricCriterion> RubricCriteria => Set<RubricCriterion>();
@@ -33,6 +34,15 @@ public sealed class AppDbContext : DbContext, IAppDbContext
         b.Entity<Exam>(e =>
         {
             e.HasOne(x => x.CreatedBy).WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ExamCorrector — Corrector↔Exam assignment (RBAC scope table)
+        b.Entity<ExamCorrector>(e =>
+        {
+            e.HasKey(x => new { x.ExamId, x.CorrectorUserId });
+            e.HasOne(x => x.Exam).WithMany().HasForeignKey(x => x.ExamId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Corrector).WithMany().HasForeignKey(x => x.CorrectorUserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.CorrectorUserId);
         });
 
         // Question
@@ -64,6 +74,9 @@ public sealed class AppDbContext : DbContext, IAppDbContext
         b.Entity<Student>(e =>
         {
             e.HasIndex(s => s.ExternalId).IsUnique();
+            // Optional login identity: one User (Role=Student) ↔ at most one Student.
+            e.HasOne(s => s.User).WithOne(u => u.Student).HasForeignKey<Student>(s => s.UserId).OnDelete(DeleteBehavior.SetNull);
+            e.HasIndex(s => s.UserId).IsUnique().HasFilter("[UserId] IS NOT NULL");
         });
 
         // Answer

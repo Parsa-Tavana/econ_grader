@@ -1,14 +1,17 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using EconGrader.Application.DTOs;
 using EconGrader.Application.Interfaces;
 using EconGrader.Application.Services;
 using EconGrader.Domain.Entities;
+using EconGrader.Web.Services;
 
 namespace EconGrader.Web.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public sealed class QuestionsController : ControllerBase
 {
     private readonly IQuestionService _svc;
@@ -16,56 +19,81 @@ public sealed class QuestionsController : ControllerBase
     private readonly IAppDbContext _db;
     private readonly IAuditLogger _audit;
     private readonly ILogger<QuestionsController> _logger;
+    private readonly CurrentUser _user;
+    private readonly IAccessScopeService _scope;
 
-    public QuestionsController(IQuestionService svc, IFileStorage storage, IAppDbContext db, IAuditLogger audit, ILogger<QuestionsController> logger)
+    public QuestionsController(IQuestionService svc, IFileStorage storage, IAppDbContext db,
+        IAuditLogger audit, ILogger<QuestionsController> logger, CurrentUser user, IAccessScopeService scope)
     {
         _svc = svc;
         _storage = storage;
         _db = db;
         _audit = audit;
         _logger = logger;
+        _user = user;
+        _scope = scope;
     }
 
     [HttpGet("{id:guid}")]
-    public async Task<ActionResult<QuestionDto>> Get(Guid id, CancellationToken ct) =>
-        await _svc.GetAsync(id, ct) is { } dto ? Ok(dto) : NotFound();
+    public async Task<ActionResult<QuestionDto>> Get(Guid id, CancellationToken ct)
+    {
+        if (!await _scope.CanAccessQuestionAsync(_user, id, writeAccess: false, ct)) return Forbid();
+        return await _svc.GetAsync(id, ct) is { } dto ? Ok(dto) : NotFound();
+    }
 
     [HttpGet("by-exam/{examId:guid}")]
-    public async Task<ActionResult<IReadOnlyList<QuestionDto>>> ListByExam(Guid examId, CancellationToken ct) =>
-        Ok(await _svc.ListByExamAsync(examId, ct));
+    public async Task<ActionResult<IReadOnlyList<QuestionDto>>> ListByExam(Guid examId, CancellationToken ct)
+    {
+        await _scope.AssertExamAccessAsync(_user, examId, writeAccess: false, ct);
+        return Ok(await _svc.ListByExamAsync(examId, ct));
+    }
 
     [HttpPost]
+    [Authorize(Roles = nameof(UserRole.Teacher))]
     public async Task<ActionResult<QuestionDto>> Create([FromBody] CreateQuestionRequest request, CancellationToken ct)
     {
+        await _scope.AssertExamAccessAsync(_user, request.ExamId, writeAccess: true, ct);
         var dto = await _svc.CreateAsync(request, ct);
         return CreatedAtAction(nameof(Get), new { id = dto.Id }, dto);
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Roles = nameof(UserRole.Teacher))]
     public async Task<ActionResult<QuestionDto>> Update(
         Guid id,
         [FromBody] UpdateQuestionRequest request,
-        CancellationToken ct) =>
-        await _svc.UpdateAsync(id, request.Text, request.MaxScore, request.RubricText, ct) is { } dto ? Ok(dto) : NotFound();
+        CancellationToken ct)
+    {
+        if (!await _scope.CanAccessQuestionAsync(_user, id, writeAccess: true, ct)) return Forbid();
+        return await _svc.UpdateAsync(id, request.Text, request.MaxScore, request.RubricText, ct) is { } dto ? Ok(dto) : NotFound();
+    }
 
     [HttpDelete("{id:guid}")]
-    public async Task<IActionResult> Delete(Guid id, CancellationToken ct) =>
-        await _svc.DeleteAsync(id, ct) ? NoContent() : NotFound();
+    [Authorize(Roles = nameof(UserRole.Teacher))]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+    {
+        if (!await _scope.CanAccessQuestionAsync(_user, id, writeAccess: true, ct)) return Forbid();
+        return await _svc.DeleteAsync(id, ct) ? NoContent() : NotFound();
+    }
 
     [HttpGet("{id:guid}/rubric")]
-    public async Task<ActionResult<RubricDto>> GetActiveRubric(Guid id, CancellationToken ct) =>
-        await _svc.GetActiveRubricAsync(id, ct) is { } dto ? Ok(dto) : NotFound();
+    public async Task<ActionResult<RubricDto>> GetActiveRubric(Guid id, CancellationToken ct)
+    {
+        if (!await _scope.CanAccessQuestionAsync(_user, id, writeAccess: false, ct)) return Forbid();
+        return await _svc.GetActiveRubricAsync(id, ct) is { } dto ? Ok(dto) : NotFound();
+    }
 
     [HttpPost("{id:guid}/rubrics")]
+    [Authorize(Roles = nameof(UserRole.Teacher))]
     public async Task<ActionResult<RubricDto>> CreateRubric(
         Guid id,
         [FromBody] CreateRubricRequest request,
-        [FromHeader(Name = "X-User-Id")] Guid createdByUserId,
         CancellationToken ct)
     {
+        if (!await _scope.CanAccessQuestionAsync(_user, id, writeAccess: true, ct)) return Forbid();
         // Ensure the rubric targets this question, regardless of body
         var effective = new CreateRubricRequest(id, request.Criteria);
-        var dto = await _svc.CreateRubricAsync(effective, createdByUserId, ct);
+        var dto = await _svc.CreateRubricAsync(effective, _user.UserId, ct);
         return CreatedAtAction(nameof(GetActiveRubric), new { id }, dto);
     }
 
@@ -74,9 +102,11 @@ public sealed class QuestionsController : ControllerBase
     /// Replaces any previously stored file for this question.
     /// </summary>
     [HttpPost("{id:guid}/file")]
+    [Authorize(Roles = nameof(UserRole.Teacher))]
     [RequestSizeLimit(FileUploadValidator.MaxBytes)]
     public async Task<IActionResult> UploadFile(Guid id, IFormFile file, CancellationToken ct)
     {
+        if (!await _scope.CanAccessQuestionAsync(_user, id, writeAccess: true, ct)) return Forbid();
         if (file.Length == 0) return BadRequest(new { code = "EMPTY_FILE", message = "Empty file" });
         var ext = FileUploadValidator.ExtensionForFile(file.ContentType, file.FileName);
         if (ext is null)
@@ -109,6 +139,7 @@ public sealed class QuestionsController : ControllerBase
     [HttpGet("{id:guid}/file")]
     public async Task<IActionResult> DownloadFile(Guid id, CancellationToken ct)
     {
+        if (!await _scope.CanAccessQuestionAsync(_user, id, writeAccess: false, ct)) return Forbid();
         var question = await _db.Questions.FindAsync([id], ct);
         if (question is null || string.IsNullOrEmpty(question.FileStorageKey)) return NotFound();
 
@@ -121,8 +152,10 @@ public sealed class QuestionsController : ControllerBase
 
     /// <summary>Remove the stored question paper file.</summary>
     [HttpDelete("{id:guid}/file")]
+    [Authorize(Roles = nameof(UserRole.Teacher))]
     public async Task<IActionResult> DeleteFile(Guid id, CancellationToken ct)
     {
+        if (!await _scope.CanAccessQuestionAsync(_user, id, writeAccess: true, ct)) return Forbid();
         var question = await _db.Questions.FindAsync([id], ct);
         if (question is null) return NotFound();
         if (string.IsNullOrEmpty(question.FileStorageKey)) return NoContent();
@@ -145,9 +178,11 @@ public sealed class QuestionsController : ControllerBase
     /// automatically so a document-only rubric can be uploaded standalone.
     /// </summary>
     [HttpPost("{id:guid}/rubric/file")]
+    [Authorize(Roles = nameof(UserRole.Teacher))]
     [RequestSizeLimit(FileUploadValidator.MaxBytes)]
     public async Task<IActionResult> UploadRubricFile(Guid id, IFormFile file, CancellationToken ct)
     {
+        if (!await _scope.CanAccessQuestionAsync(_user, id, writeAccess: true, ct)) return Forbid();
         if (file.Length == 0) return BadRequest(new { code = "EMPTY_FILE", message = "Empty file" });
         var ext = FileUploadValidator.ExtensionForFile(file.ContentType, file.FileName);
         if (ext is null)
@@ -158,8 +193,7 @@ public sealed class QuestionsController : ControllerBase
 
         // Attach to the active rubric; auto-create one when the teacher uploads
         // a document before defining criteria (fixes NO_ACTIVE_RUBRIC 404s).
-        var createdByUserId = Request.Headers.TryGetValue("X-User-Id", out var uid)
-            && Guid.TryParse(uid.ToString(), out var parsedUid) ? parsedUid : Guid.Empty;
+        var createdByUserId = _user.UserId;
 
         var rubric = await _db.Rubrics.FirstOrDefaultAsync(r => r.QuestionId == id && r.IsActive, ct);
         bool createdRubric = false;
@@ -210,6 +244,7 @@ public sealed class QuestionsController : ControllerBase
     [HttpGet("{id:guid}/rubric/file")]
     public async Task<IActionResult> DownloadRubricFile(Guid id, CancellationToken ct)
     {
+        if (!await _scope.CanAccessQuestionAsync(_user, id, writeAccess: false, ct)) return Forbid();
         var rubric = await _db.Rubrics.FirstOrDefaultAsync(r => r.QuestionId == id && r.IsActive, ct);
         if (rubric is null || string.IsNullOrEmpty(rubric.FileStorageKey)) return NotFound();
 
@@ -221,8 +256,10 @@ public sealed class QuestionsController : ControllerBase
 
     /// <summary>Remove the active rubric document.</summary>
     [HttpDelete("{id:guid}/rubric/file")]
+    [Authorize(Roles = nameof(UserRole.Teacher))]
     public async Task<IActionResult> DeleteRubricFile(Guid id, CancellationToken ct)
     {
+        if (!await _scope.CanAccessQuestionAsync(_user, id, writeAccess: true, ct)) return Forbid();
         var rubric = await _db.Rubrics.FirstOrDefaultAsync(r => r.QuestionId == id && r.IsActive, ct);
         if (rubric is null) return NotFound();
         if (string.IsNullOrEmpty(rubric.FileStorageKey)) return NoContent();

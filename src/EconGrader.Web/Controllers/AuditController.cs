@@ -1,3 +1,5 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using EconGrader.Application.Interfaces;
 using EconGrader.Domain.Entities;
@@ -7,6 +9,7 @@ namespace EconGrader.Web.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize(Roles = nameof(UserRole.Admin))]
 public sealed class AuditController : ControllerBase
 {
     private readonly IAuditLogger _audit;
@@ -38,12 +41,13 @@ public sealed class AuditController : ControllerBase
         return Ok(logs.Select(l => new AuditEntryDto(l.Id, l.Timestamp, l.Action, l.EntityType, l.EntityId, l.UserId, l.Details, l.IpAddress)));
     }
 
+    /// <summary>Manual entry write — attributed to the authenticated admin.</summary>
     [HttpPost]
     public async Task<IActionResult> Write(
         [FromBody] WriteAuditRequest body,
-        [FromHeader(Name = "X-User-Id")] Guid? userId,
         CancellationToken ct)
     {
+        Guid? userId = Guid.TryParse(User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier), out var id) ? id : null;
         await _audit.WriteAsync(body.Action, body.EntityType, body.EntityId, userId, body.Details, body.IpAddress, ct);
         return Accepted();
     }

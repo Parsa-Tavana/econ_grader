@@ -61,6 +61,11 @@ services:
       - ConnectionStrings__DefaultConnection=Server=db,1433;Database=EconGrader;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=True;Encrypt=False
       - GradingService__BaseUrl=http://grading:5001
       - FileStorage__RootPath=/srv/storage/images
+      # JWT auth — keys come from .env (see JWT_SIGNING_KEY there).
+      # Tokens signed by any other key are rejected; empty bootstrap key
+      # leaves the one-shot admin bootstrap endpoint disabled.
+      - Jwt__SigningKey=${JWT_SIGNING_KEY}
+      - Jwt__BootstrapAdminKey=${JWT_BOOTSTRAP_ADMIN_KEY}
       - Serilog__MinimumLevel__Default=Information
     volumes:
       # Same volume & path as the grading service (see comment above).
