@@ -7,6 +7,11 @@ import json
 class Settings(BaseSettings):
     # Provider selection
     MODEL_PROVIDER: str = Field(default="claude", description="claude | gemini | qwen")
+    # Per-provider models — each grader uses its own; MODEL_NAME stays as the
+    # legacy fallback so existing deployments keep working.
+    CLAUDE_MODEL: str = Field(default="claude-3-5-sonnet-20241022")
+    GEMINI_MODEL: str = Field(default="gemini-2.0-flash")
+    QWEN_MODEL: str = Field(default="qwen2.5-vl-7b-instruct")
     MODEL_NAME: str = Field(default="claude-3-5-sonnet-20241022")
     MODEL_VERSION: Optional[str] = None
     

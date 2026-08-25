@@ -27,25 +27,26 @@ class QwenVisionGrader(IVisionGrader):
         self,
         *,
         question_text: str,
-        question_images: list[bytes],
+        question_images: list[tuple[bytes, str]],
         rubric: dict[str, Any],
-        answer_images: list[bytes],
+        answer_images: list[tuple[bytes, str]],
         max_score: float,
         temperature: float,
         prompt_version: str,
+        extra_text: str = "",
     ) -> GradingResult:
         start_ms = time.time()
+        model_name = settings.QWEN_MODEL or settings.MODEL_NAME
         prompt_text = load_prompt(prompt_version)
 
         content: list[dict[str, Any]] = []
-        for img in question_images:
+        for data, media_type in [*question_images, *answer_images]:
             content.append({"type": "image_url", "image_url": {
-                "url": f"data:image/png;base64,{base64.b64encode(img).decode()}"
+                "url": f"data:{media_type};base64,{base64.b64encode(data).decode()}"
             }})
-        for img in answer_images:
-            content.append({"type": "image_url", "image_url": {
-                "url": f"data:image/png;base64,{base64.b64encode(img).decode()}"
-            }})
+        if extra_text.strip():
+            # Extracted document text (e.g. DOCX typed answers / rubric files)
+            content.append({"type": "text", "text": f"Additional documents:\n{extra_text.strip()}"})
         content.append({"type": "text", "text": prompt_text.format(
             question_text=question_text,
             rubric_json=json.dumps(rubric, indent=2),
@@ -60,7 +61,7 @@ class QwenVisionGrader(IVisionGrader):
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": settings.MODEL_NAME,
+                    "model": model_name,
                     "messages": [
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": content},
@@ -78,7 +79,7 @@ class QwenVisionGrader(IVisionGrader):
             usage = body.get("usage", {})
             return GradingResult(
                 provider="qwen",
-                model_name=settings.MODEL_NAME,
+                model_name=model_name,
                 model_version=None,
                 prompt_version=prompt_version,
                 temperature=temperature,
@@ -104,7 +105,7 @@ class QwenVisionGrader(IVisionGrader):
         except Exception as exc:
             logger.exception("Qwen grading failed")
             return GradingResult(
-                provider="qwen", model_name=settings.MODEL_NAME, model_version=None,
+                provider="qwen", model_name=model_name, model_version=None,
                 prompt_version=prompt_version, temperature=temperature, ai_score=0.0,
                 reasoning="", raw_response="", latency_ms=int((time.time() - start_ms) * 1000),
                 error=f"Qwen API failure: {exc}",

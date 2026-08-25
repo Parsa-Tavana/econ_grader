@@ -25,21 +25,23 @@ class GeminiVisionGrader(IVisionGrader):
         self,
         *,
         question_text: str,
-        question_images: list[bytes],
+        question_images: list[tuple[bytes, str]],
         rubric: dict[str, Any],
-        answer_images: list[bytes],
+        answer_images: list[tuple[bytes, str]],
         max_score: float,
         temperature: float,
         prompt_version: str,
+        extra_text: str = "",
     ) -> GradingResult:
         start_ms = time.time()
+        model_name = settings.GEMINI_MODEL or settings.MODEL_NAME
         prompt_text = load_prompt(prompt_version)
-        
+
         parts: list[Any] = []
-        for img in question_images:
-            parts.append(types.Part.from_bytes(data=img, mime_type="image/png"))
-        for img in answer_images:
-            parts.append(types.Part.from_bytes(data=img, mime_type="image/png"))
+        for data, media_type in [*question_images, *answer_images]:
+            parts.append(types.Part.from_bytes(data=data, mime_type=media_type))
+        if extra_text.strip():
+            parts.append(types.Part.from_text(text=f"Additional documents:\n{extra_text.strip()}"))
         parts.append(types.Part.from_text(text=prompt_text.format(
             question_text=question_text,
             rubric_json=json.dumps(rubric, indent=2),
@@ -48,7 +50,7 @@ class GeminiVisionGrader(IVisionGrader):
 
         try:
             resp = self._client.models.generate_content(
-                model=settings.MODEL_NAME,
+                model=model_name,
                 contents=parts,
                 config=types.GenerateContentConfig(
                     temperature=temperature,
@@ -61,7 +63,7 @@ class GeminiVisionGrader(IVisionGrader):
             parsed = self._parse_response(raw_text)
             return GradingResult(
                 provider="gemini",
-                model_name=settings.MODEL_NAME,
+                model_name=model_name,
                 model_version=resp.model_version,
                 prompt_version=prompt_version,
                 temperature=temperature,
@@ -87,7 +89,7 @@ class GeminiVisionGrader(IVisionGrader):
         except Exception as exc:
             logger.exception("Gemini grading failed")
             return GradingResult(
-                provider="gemini", model_name=settings.MODEL_NAME, model_version=None,
+                provider="gemini", model_name=model_name, model_version=None,
                 prompt_version=prompt_version, temperature=temperature, ai_score=0.0,
                 reasoning="", raw_response="", latency_ms=int((time.time() - start_ms) * 1000),
                 error=f"Gemini API failure: {exc}",
