@@ -25,7 +25,11 @@ services:
     container_name: econgrader-grading
     environment:
       - MODEL_PROVIDER=claude
-      - MODEL_NAME=claude-3-5-sonnet-20241022
+      - MODEL_NAME=claude-econ
+      # Route through the local 9router gateway (Desktop-app proxy on the host).
+      # host.docker.internal, NOT localhost — the grader runs inside Docker.
+      - ANTHROPIC_BASE_URL=http://host.docker.internal:20128/v1
+      - CLAUDE_MODEL=claude-econ
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - QWEN_BASE_URL=http://localhost:8000/v1
