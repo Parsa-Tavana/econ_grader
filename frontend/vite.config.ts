@@ -23,6 +23,9 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Allow access from other machines / tunnels (share-demo.ps1 uses cloudflared).
+    host: true, // listen on 0.0.0.0, not just localhost
+    allowedHosts: true, // accept any Host header (trycloudflare.com etc.)
     proxy: {
       "/api": {
         target: "http://localhost:8080",
