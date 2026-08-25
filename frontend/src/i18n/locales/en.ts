@@ -408,6 +408,22 @@ const en = {
     userId: "User ID",
     details: "Details",
   },
+  auth: {
+    email: "Email",
+    password: "Password",
+    signIn: "Sign in",
+    signingIn: "Signing in…",
+    invalidCredentials: "Invalid email or password.",
+    loginFailed: "Sign-in failed — check your connection and try again.",
+  },
+  user: {
+    signedInAs: "Signed in as",
+    logout: "Log out",
+    roleAdmin: "Admin",
+    roleTeacher: "Teacher",
+    roleCorrector: "Corrector",
+    roleStudent: "Student",
+  },
   settings: {
     title: "Settings",
     language: "Language",

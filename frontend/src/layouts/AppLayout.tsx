@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   LayoutDashboard,
@@ -12,10 +12,12 @@ import {
   Languages,
   Wifi,
   WifiOff,
+  LogOut,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { changeLanguage, type AppLang } from "../i18n";
 import { healthCheck } from "../api/system";
+import { getAuthUser, logout } from "../api/auth";
 import { ToastProvider } from "../hooks/useToast";
 
 const NAV_ITEMS = [
@@ -79,6 +81,36 @@ function HealthDot() {
           ? t("settings.online")
           : t("settings.offline")}
     </span>
+  );
+}
+
+function UserMenu() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const user = getAuthUser();
+  if (!user) return null;
+  const roleKey = `user.role${user.role}` as const;
+
+  return (
+    <div className="flex items-center gap-2">
+      <span
+        className="hidden max-w-[180px] truncate rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs font-medium text-zinc-600 sm:inline-flex"
+        title={`${t("user.signedInAs")}: ${user.email}`}
+      >
+        {user.displayName || user.email}
+        <span className="ms-1.5 text-zinc-400">· {t(roleKey)}</span>
+      </span>
+      <button
+        onClick={() => {
+          logout();
+          navigate("/login", { replace: true });
+        }}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs font-medium text-zinc-600 transition hover:bg-zinc-100"
+        title={t("user.logout")}
+      >
+        <LogOut size={14} />
+      </button>
+    </div>
   );
 }
 
@@ -147,6 +179,7 @@ export default function AppLayout() {
             <div className="flex items-center gap-2">
               <HealthDot />
               <LanguageToggle />
+              <UserMenu />
             </div>
           </header>
 

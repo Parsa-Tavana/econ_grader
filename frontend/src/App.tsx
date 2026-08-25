@@ -1,5 +1,6 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom";
 import AppLayout from "./layouts/AppLayout";
+import LoginPage, { isLoggedIn } from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
 import ExamsPage from "./pages/ExamsPage";
 import ExamDetailPage from "./pages/ExamDetailPage";
@@ -10,23 +11,46 @@ import WorkspacePage from "./pages/WorkspacePage";
 import EvaluationPage from "./pages/EvaluationPage";
 import AuditPage from "./pages/AuditPage";
 import SettingsPage from "./pages/SettingsPage";
+import { getAuthUser } from "./api/auth";
+
+/** Blocks unauthenticated access; remembers where the user was headed. */
+function RequireAuth() {
+  const location = useLocation();
+  if (!isLoggedIn()) {
+    const here = encodeURIComponent(location.pathname + location.search);
+    return <Navigate to={`/login?next=${here}`} replace />;
+  }
+  return <Outlet />;
+}
+
+/** Admin-only subtree (audit log). Teachers bounce to the dashboard. */
+function RequireAdmin() {
+  const user = getAuthUser();
+  if (user?.role !== "Admin") return <Navigate to="/" replace />;
+  return <Outlet />;
+}
 
 export default function App() {
   return (
     <Routes>
-      <Route element={<AppLayout />}>
-        <Route index element={<DashboardPage />} />
-        <Route path="exams" element={<ExamsPage />} />
-        <Route path="exams/:examId" element={<ExamDetailPage />} />
-        <Route path="students" element={<StudentsPage />} />
-        <Route path="students/:studentId" element={<StudentDetailPage />} />
-        <Route path="grading/queue" element={<QueuePage />} />
-        <Route path="grading/workspace/:answerId" element={<WorkspacePage />} />
-        <Route path="evaluation" element={<EvaluationPage />} />
-        <Route path="audit" element={<AuditPage />} />
-        <Route path="settings" element={<SettingsPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="/login" element={<LoginPage />} />
+      <Route element={<RequireAuth />}>
+        <Route element={<AppLayout />}>
+          <Route index element={<DashboardPage />} />
+          <Route path="exams" element={<ExamsPage />} />
+          <Route path="exams/:examId" element={<ExamDetailPage />} />
+          <Route path="students" element={<StudentsPage />} />
+          <Route path="students/:studentId" element={<StudentDetailPage />} />
+          <Route path="grading/queue" element={<QueuePage />} />
+          <Route path="grading/workspace/:answerId" element={<WorkspacePage />} />
+          <Route path="evaluation" element={<EvaluationPage />} />
+          <Route element={<RequireAdmin />}>
+            <Route path="audit" element={<AuditPage />} />
+          </Route>
+          <Route path="settings" element={<SettingsPage />} />
+        </Route>
       </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }
