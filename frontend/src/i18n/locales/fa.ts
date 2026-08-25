@@ -66,7 +66,7 @@ const fa = {
     replace: "جایگزینی",
     uploaded: "فایل با موفقیت بارگذاری شد",
     removed: "فایل حذف شد",
-    unsupportedType: "نوع فایل ({{type}}) پشتیبانی نمی‌شود — از PDF، PNG، JPG یا DOCX استفاده کنید",
+    unsupportedType: "نوع فایل ({{type}}) پشتیبانی نمی‌شود — از PDF، PNG، JPG، DOCX، XLSX یا XLS استفاده کنید",
     tooLarge: "حجم فایل بیش از ۲۰ مگابایت است",
   },
   dashboard: {

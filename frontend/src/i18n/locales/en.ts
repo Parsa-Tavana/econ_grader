@@ -66,7 +66,7 @@ const en = {
     replace: "Replace",
     uploaded: "File uploaded successfully",
     removed: "File removed",
-    unsupportedType: "Unsupported file type ({{type}}) — use PDF, PNG, JPG or DOCX",
+    unsupportedType: "Unsupported file type ({{type}}) — use PDF, PNG, JPG, DOCX, XLSX or XLS",
     tooLarge: "File is larger than 20 MB",
   },
   dashboard: {

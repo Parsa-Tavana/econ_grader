@@ -422,7 +422,7 @@ function QuestionCard({
         >
           <Upload size={13} />
           {uploading ? t("answers.uploading") : t("answers.uploadAnswer")}
-          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.docx" className="hidden" onChange={handleUpload} disabled={uploading} />
+          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.docx,.xlsx,.xls" className="hidden" onChange={handleUpload} disabled={uploading} />
         </label>
         <Link to={`/grading/queue?questionId=${question.id}`} className="text-xs font-medium text-primary-600 hover:underline">
           {t("queue.openQueue")} ({formatNumber(answersQ.data?.length ?? 0, lang)})

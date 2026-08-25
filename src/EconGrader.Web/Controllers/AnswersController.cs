@@ -37,7 +37,7 @@ public sealed class AnswersController : ControllerBase
     /// optional teacher ground-truth score (never exposed to the AI).
     /// </summary>
     /// <summary>
-    /// Upload a scanned/typed answer sheet (PNG/JPG/PDF/DOCX, ≤20 MB) for one
+    /// Upload a scanned/typed answer sheet (PNG/JPG/PDF/DOCX/XLSX/XLS, ≤20 MB) for one
     /// student + one question. Stored via IFileStorage; optional teacher
     /// ground-truth scores are never exposed to the AI.
     /// </summary>
@@ -52,8 +52,9 @@ public sealed class AnswersController : ControllerBase
         CancellationToken ct)
     {
         if (file.Length == 0) return BadRequest(new { code = "EMPTY_FILE", message = "Empty file" });
-        if (!FileUploadValidator.IsAllowedContentType(file.ContentType))
-            return StatusCode(415, new { code = "UNSUPPORTED_MEDIA_TYPE", message = $"Unsupported file type '{file.ContentType}' — use PDF, PNG, JPG or DOCX" });
+        var ext = FileUploadValidator.ExtensionForFile(file.ContentType, file.FileName);
+        if (ext is null)
+            return StatusCode(415, new { code = "UNSUPPORTED_MEDIA_TYPE", message = $"Unsupported file type '{file.ContentType}' — use {FileUploadValidator.AcceptedTypesDisplay}" });
 
         // Ensure the student exists
         if (await _db.Students.FindAsync([studentId], ct) is null)
@@ -67,7 +68,6 @@ public sealed class AnswersController : ControllerBase
             catch (IOException ex) { _logger.LogWarning(ex, "Could not delete previous answer file {Key}", existing.ImageStorageKey); }
         }
 
-        var ext = FileUploadValidator.ExtensionFor(file.ContentType)!;
         var key = $"answers/{questionId:N}/{studentId:N}/{Guid.NewGuid():N}{ext}";
         await using var stream = file.OpenReadStream();
         await _storage.SaveAsync(stream, key, ct);

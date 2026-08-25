@@ -7,6 +7,9 @@ google-genai==0.6.0
 pdf2image==1.17.0
 Pillow==11.1.0
 numpy>=1.26
+# Legacy .xls extraction only (.xlsx uses a stdlib reader in attachments.py)
+pandas==2.2.3
+xlrd==2.0.1
 pytest==8.3.4
 httpx==0.28.1
 python-multipart==0.0.20

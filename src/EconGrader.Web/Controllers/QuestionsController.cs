@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using EconGrader.Application.DTOs;
 using EconGrader.Application.Interfaces;
 using EconGrader.Application.Services;
+using EconGrader.Domain.Entities;
 
 namespace EconGrader.Web.Controllers;
 
@@ -13,13 +14,15 @@ public sealed class QuestionsController : ControllerBase
     private readonly IQuestionService _svc;
     private readonly IFileStorage _storage;
     private readonly IAppDbContext _db;
+    private readonly IAuditLogger _audit;
     private readonly ILogger<QuestionsController> _logger;
 
-    public QuestionsController(IQuestionService svc, IFileStorage storage, IAppDbContext db, ILogger<QuestionsController> logger)
+    public QuestionsController(IQuestionService svc, IFileStorage storage, IAppDbContext db, IAuditLogger audit, ILogger<QuestionsController> logger)
     {
         _svc = svc;
         _storage = storage;
         _db = db;
+        _audit = audit;
         _logger = logger;
     }
 
@@ -67,7 +70,7 @@ public sealed class QuestionsController : ControllerBase
     }
 
     /// <summary>
-    /// Upload/replace the question paper file (PDF/PNG/JPG/DOCX, ≤20 MB).
+    /// Upload/replace the question paper file (PDF/PNG/JPG/DOCX/XLSX/XLS, ≤20 MB).
     /// Replaces any previously stored file for this question.
     /// </summary>
     [HttpPost("{id:guid}/file")]
@@ -75,8 +78,9 @@ public sealed class QuestionsController : ControllerBase
     public async Task<IActionResult> UploadFile(Guid id, IFormFile file, CancellationToken ct)
     {
         if (file.Length == 0) return BadRequest(new { code = "EMPTY_FILE", message = "Empty file" });
-        if (!FileUploadValidator.IsAllowedContentType(file.ContentType))
-            return StatusCode(415, new { code = "UNSUPPORTED_MEDIA_TYPE", message = $"Unsupported file type '{file.ContentType}' — use PDF, PNG, JPG or DOCX" });
+        var ext = FileUploadValidator.ExtensionForFile(file.ContentType, file.FileName);
+        if (ext is null)
+            return StatusCode(415, new { code = "UNSUPPORTED_MEDIA_TYPE", message = $"Unsupported file type '{file.ContentType}' — use {FileUploadValidator.AcceptedTypesDisplay}" });
 
         var question = await _db.Questions.FindAsync([id], ct);
         if (question is null) return NotFound();
@@ -88,7 +92,6 @@ public sealed class QuestionsController : ControllerBase
             catch (IOException ex) { _logger.LogWarning(ex, "Could not delete previous question file {Key}", question.FileStorageKey); }
         }
 
-        var ext = FileUploadValidator.ExtensionFor(file.ContentType)!;
         var key = $"questions/{id:N}/{Guid.NewGuid():N}{ext}";
         await using var stream = file.OpenReadStream();
         await _storage.SaveAsync(stream, key, ct);
@@ -136,17 +139,46 @@ public sealed class QuestionsController : ControllerBase
 
     // ── Rubric document (attaches to the ACTIVE rubric version) ─────────────
 
-    /// <summary>Upload/replace the rubric document for this question's active rubric.</summary>
+    /// <summary>
+    /// Upload/replace the rubric document (PDF/PNG/JPG/DOCX/XLSX/XLS, ≤20 MB).
+    /// If the question has no active rubric version yet, one is created
+    /// automatically so a document-only rubric can be uploaded standalone.
+    /// </summary>
     [HttpPost("{id:guid}/rubric/file")]
     [RequestSizeLimit(FileUploadValidator.MaxBytes)]
     public async Task<IActionResult> UploadRubricFile(Guid id, IFormFile file, CancellationToken ct)
     {
         if (file.Length == 0) return BadRequest(new { code = "EMPTY_FILE", message = "Empty file" });
-        if (!FileUploadValidator.IsAllowedContentType(file.ContentType))
-            return StatusCode(415, new { code = "UNSUPPORTED_MEDIA_TYPE", message = $"Unsupported file type '{file.ContentType}' — use PDF, PNG, JPG or DOCX" });
+        var ext = FileUploadValidator.ExtensionForFile(file.ContentType, file.FileName);
+        if (ext is null)
+            return StatusCode(415, new { code = "UNSUPPORTED_MEDIA_TYPE", message = $"Unsupported file type '{file.ContentType}' — use {FileUploadValidator.AcceptedTypesDisplay}" });
+
+        var questionExists = await _db.Questions.AnyAsync(q => q.Id == id, ct);
+        if (!questionExists) return NotFound();
+
+        // Attach to the active rubric; auto-create one when the teacher uploads
+        // a document before defining criteria (fixes NO_ACTIVE_RUBRIC 404s).
+        var createdByUserId = Request.Headers.TryGetValue("X-User-Id", out var uid)
+            && Guid.TryParse(uid.ToString(), out var parsedUid) ? parsedUid : Guid.Empty;
 
         var rubric = await _db.Rubrics.FirstOrDefaultAsync(r => r.QuestionId == id && r.IsActive, ct);
-        if (rubric is null) return NotFound(new { code = "NO_ACTIVE_RUBRIC", message = "Define a rubric before uploading its document" });
+        bool createdRubric = false;
+        if (rubric is null)
+        {
+            var maxVersion = await _db.Rubrics
+                .Where(r => r.QuestionId == id)
+                .MaxAsync(r => (int?)r.Version, ct) ?? 0;
+
+            rubric = new Rubric
+            {
+                QuestionId = id,
+                Version = maxVersion + 1,
+                IsActive = true,
+                CreatedByUserId = createdByUserId,
+            };
+            _db.Rubrics.Add(rubric);
+            createdRubric = true;
+        }
 
         if (!string.IsNullOrEmpty(rubric.FileStorageKey))
         {
@@ -154,7 +186,6 @@ public sealed class QuestionsController : ControllerBase
             catch (IOException ex) { _logger.LogWarning(ex, "Could not delete previous rubric file {Key}", rubric.FileStorageKey); }
         }
 
-        var ext = FileUploadValidator.ExtensionFor(file.ContentType)!;
         var key = $"rubrics/{id:N}/{Guid.NewGuid():N}{ext}";
         await using var stream = file.OpenReadStream();
         await _storage.SaveAsync(stream, key, ct);
@@ -164,7 +195,14 @@ public sealed class QuestionsController : ControllerBase
         rubric.ContentType = file.ContentType;
         await _db.SaveChangesAsync(ct);
 
-        _logger.LogInformation("Rubric file uploaded QuestionId={QuestionId} RubricId={RubricId} {FileName}", id, rubric.Id, rubric.FileName);
+        if (createdRubric)
+            await _audit.WriteAsync("RubricCreated", "Rubric", rubric.Id,
+                createdByUserId == Guid.Empty ? null : createdByUserId,
+                new { QuestionId = id, rubric.Version, Source = "RubricFileUpload" }, cancellationToken: ct);
+
+        _logger.LogInformation(
+            "Rubric file uploaded QuestionId={QuestionId} RubricId={RubricId} CreatedNewRubric={CreatedNewRubric} {FileName}",
+            id, rubric.Id, createdRubric, rubric.FileName);
         return Ok(new { fileStorageKey = key, fileName = rubric.FileName, contentType = rubric.ContentType });
     }
 

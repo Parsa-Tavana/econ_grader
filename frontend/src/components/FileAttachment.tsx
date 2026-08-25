@@ -6,7 +6,7 @@ import { Button } from "./ui/Button";
 import { friendlyError } from "./ui/Feedback";
 import { useToast } from "../hooks/useToast";
 
-export const ACCEPTED_TYPES = ".pdf,.png,.jpg,.jpeg,.docx";
+export const ACCEPTED_TYPES = ".pdf,.png,.jpg,.jpeg,.docx,.xlsx,.xls";
 
 interface FileAttachmentProps {
   /** Which role this attachment plays — shown to the user. */
@@ -47,13 +47,19 @@ export function FileAttachment({
   const [busy, setBusy] = useState(false);
 
   function validate(file: File): boolean {
+    // Browsers report varying MIME types for Office files (some use
+    // application/octet-stream), so fall back to the extension.
     const okTypes = [
       "application/pdf",
       "image/png",
       "image/jpeg",
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.ms-excel",
     ];
-    if (!okTypes.includes(file.type)) {
+    const okExts = [".pdf", ".png", ".jpg", ".jpeg", ".docx", ".xlsx", ".xls"];
+    const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
+    if (!okTypes.includes(file.type) && !okExts.includes(ext)) {
       toast.error(t("files.unsupportedType", { type: file.type || file.name }));
       return false;
     }
