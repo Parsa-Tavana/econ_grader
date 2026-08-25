@@ -156,13 +156,16 @@ function Charts({ ev, t, lang }: { ev: DistMatrix; t: (k: string) => string; lan
     .map(Number)
     .sort((a, b) => a - b);
 
+  // Sort numerically on the RAW score BEFORE formatting — formatting to
+  // Persian digits makes Number() return NaN and breaks chart ordering.
   const distData = Object.entries(ev)
-    .map(([ts, aiCounts]) => {
-      const row: Record<string, string | number> = { teacher: formatScore(Number(ts), lang) };
+    .map(([ts, aiCounts]) => ({ rawTs: Number(ts), aiCounts }))
+    .sort((a, b) => a.rawTs - b.rawTs)
+    .map(({ rawTs, aiCounts }) => {
+      const row: Record<string, string | number> = { teacher: formatScore(rawTs, lang) };
       for (const ai of aiScores) row[formatScore(ai, lang)] = aiCounts[String(ai)] ?? 0;
       return row;
-    })
-    .sort((a, b) => Number(a.teacher) - Number(b.teacher));
+    });
 
   const scatterData = Object.entries(ev).flatMap(([ts, aiCounts]) =>
     Object.entries(aiCounts)

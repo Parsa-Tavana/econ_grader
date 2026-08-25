@@ -59,9 +59,15 @@ export default function AuditPage() {
         }
       />
 
-      {/* Filters */}
+      {/* Filters — real <form> so Enter key applies filters */}
       <Card className="mb-5">
-        <div className="grid gap-3 md:grid-cols-4" onSubmit={applyFilters}>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            applyFilters();
+          }}
+        >
+        <div className="grid gap-3 md:grid-cols-4">
           <label className="block">
             <span className="mb-1.5 block text-xs font-medium text-zinc-700">{t("audit.entityTypeFilter")}</span>
             <Input value={entityType} onChange={(e) => setEntityType(e.target.value)} placeholder="Exam / Question / Answer…" />
@@ -81,10 +87,11 @@ export default function AuditPage() {
         </div>
         <div className="mt-3 flex items-center justify-between">
           <Badge tone="zinc">{t("audit.entriesCount", { count: auditQ.data?.length ?? 0 })}</Badge>
-          <Button size="sm" onClick={applyFilters}>
+          <Button size="sm" type="submit">
             {t("common.search")}
           </Button>
         </div>
+        </form>
       </Card>
 
       {/* Table */}
