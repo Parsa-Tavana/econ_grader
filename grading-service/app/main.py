@@ -107,7 +107,7 @@ async def grade(req: GradeRequest):
     provider = req.provider or settings.MODEL_PROVIDER
 
     # Convert every attachment (PDF → page PNGs, DOCX → text, PNG/JPG → pass-through).
-    for p in [*req.answer_image_paths, *req.question_image_paths]:
+    for p in [*req.answer_image_paths, *req.question_image_paths, *req.rubric_file_paths]:
         if not Path(p).exists():
             raise HTTPException(status_code=422, detail={
                 "stage": "image_load",
@@ -116,7 +116,7 @@ async def grade(req: GradeRequest):
             })
 
     try:
-        prep = prepare_attachments(req.answer_image_paths, req.question_image_paths)
+        prep = prepare_attachments(req.answer_image_paths, req.question_image_paths, req.rubric_file_paths)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
@@ -131,8 +131,11 @@ async def grade(req: GradeRequest):
         raise HTTPException(status_code=422, detail=str(exc))
 
     rubric_dict = {"criteria": [c.model_dump() for c in req.rubric.criteria]}
+    # The typed متن سؤال and the question paper's extracted text are ONE
+    # question statement to the AI — either may be empty.
+    combined_question_text = prep.combined_question_text(req.question_text)
     result = grader.grade(
-        question_text=req.question_text,
+        question_text=combined_question_text,
         question_images=prep.question_images,
         rubric=rubric_dict,
         answer_images=prep.answer_images,
@@ -140,6 +143,8 @@ async def grade(req: GradeRequest):
         temperature=req.temperature,
         prompt_version=req.prompt_version,
         extra_text=prep.extra_text,
+        rubric_text=prep.rubric_extra_text,
+        rubric_images=prep.rubric_images,
     )
 
     latency_ms = result.latency_ms or int((time.time() - t0) * 1000)
@@ -165,7 +170,7 @@ async def grade(req: GradeRequest):
         provider=provider.lower(),
         input_tokens=result.input_tokens,
         output_tokens=result.output_tokens,
-        num_images=len(prep.answer_images) + len(prep.question_images),
+        num_images=len(prep.answer_images) + len(prep.question_images) + len(prep.rubric_images),
     )
 
     resp = GradeResponse(

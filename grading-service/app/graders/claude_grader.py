@@ -32,21 +32,28 @@ class ClaudeVisionGrader(IVisionGrader):
         temperature: float,
         prompt_version: str,
         extra_text: str = "",
+        rubric_text: str = "",
+        rubric_images: list[tuple[bytes, str]] | None = None,
     ) -> GradingResult:
         start_ms = time.time()
         model_name = settings.CLAUDE_MODEL or settings.MODEL_NAME
         prompt_text = load_prompt(prompt_version)
+        rubric_images = rubric_images or []
 
         content: list[dict[str, Any]] = []
-        for data, media_type in [*question_images, *answer_images]:
+        # Order matters: question paper → student answer → rubric document → prompt.
+        for data, media_type in [*question_images, *answer_images, *rubric_images]:
             content.append({"type": "image", "source": {
                 "type": "base64",
                 "media_type": media_type,
                 "data": base64.b64encode(data).decode(),
             }})
         if extra_text.strip():
-            # Extracted document text (e.g. DOCX typed answers / rubric files)
-            content.append({"type": "text", "text": f"Additional documents:\n{extra_text.strip()}"})
+            # Extracted text from the student's typed answer documents
+            content.append({"type": "text", "text": f"Student typed answer documents:\n{extra_text.strip()}"})
+        if rubric_text.strip():
+            # Extracted text from the uploaded rubric document (DOCX/XLSX)
+            content.append({"type": "text", "text": f"Rubric document:\n{rubric_text.strip()}"})
         content.append({"type": "text", "text": prompt_text.format(
             question_text=question_text,
             rubric_json=json.dumps(rubric, indent=2),

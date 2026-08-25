@@ -8,9 +8,15 @@ accept images (+ text in the prompt). This module is the single conversion point
   - XLSX/XLS   → extracted cell text, one block per sheet (appended to the prompt)
   - PNG/JPG    → passed through with the correct media type
 
-Every grader receives (images, extra_text) instead of raw bytes it must
-guess the type of. Conversion failures raise — they are surfaced as
-validation errors on the run, never silently skipped.
+Files arrive in three roles and are kept apart so the grader can present each
+correctly:
+  - answer   → student answer images + typed-answer document text
+  - question → question paper images; document text merges into the question
+               statement alongside the typed question text
+  - rubric   → rubric document images + text, shown beside the structured rubric
+
+Conversion failures raise — they are surfaced as validation errors on the run,
+never silently skipped.
 """
 from __future__ import annotations
 
@@ -29,11 +35,26 @@ IMAGE_MEDIA = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
 
 @dataclass
 class PreparedAttachments:
-    """Provider-ready form of all uploaded files for one grading request."""
+    """Provider-ready form of all uploaded files for one grading request.
+
+    Text is split by role so the grader can merge question-document text into
+    the question statement while keeping rubric documents separate.
+    """
     answer_images: list[tuple[bytes, str]] = field(default_factory=list)  # (bytes, media_type)
     question_images: list[tuple[bytes, str]] = field(default_factory=list)
-    extra_text: str = ""          # DOCX text etc., appended to the prompt
+    rubric_images: list[tuple[bytes, str]] = field(default_factory=list)
+    extra_text: str = ""              # student typed answers (DOCX etc.)
+    question_extra_text: str = ""     # question paper document text (DOCX/XLSX…)
+    rubric_extra_text: str = ""       # rubric document text
     warnings: list[str] = field(default_factory=list)
+
+    def combined_question_text(self, typed_text: str) -> str:
+        """Typed question text + extracted question-document text as ONE statement.
+
+        Either side may be empty; the separator keeps the pieces unambiguous.
+        """
+        parts = [typed_text.strip(), self.question_extra_text.strip()]
+        return "\n\n".join(p for p in parts if p)
 
 
 def _media_type_for(path: Path) -> Optional[str]:
@@ -193,6 +214,7 @@ def _extract_xls_text(path: Path) -> str:
 def prepare_attachments(
     answer_paths: list[str],
     question_paths: list[str],
+    rubric_paths: list[str] | None = None,
 ) -> PreparedAttachments:
     """Convert every file to its provider-ready representation.
 
@@ -200,21 +222,38 @@ def prepare_attachments(
     extension, unreadable PDF) — the caller turns that into a failed run.
     """
     prep = PreparedAttachments()
+    rubric_paths = rubric_paths or []
 
-    def convert(path_str: str, *, is_answer: bool):
+    def convert(path_str: str, *, role: str):
+        """role is 'answer', 'question' or 'rubric'."""
         path = Path(path_str)
         ext = path.suffix.lower()
 
+        images_for_role = {
+            "answer": prep.answer_images,
+            "question": prep.question_images,
+            "rubric": prep.rubric_images,
+        }[role]
+
+        def append_text(value: str):
+            """Append to the per-role text bucket (str is immutable — always
+            assign back to the attribute, never `bucket +=`)."""
+            if role == "question":
+                prep.question_extra_text += value
+            elif role == "rubric":
+                prep.rubric_extra_text += value
+            else:
+                prep.extra_text += value
+
         if ext in IMAGE_MEDIA:
             item = (path.read_bytes(), IMAGE_MEDIA[ext])
-            (prep.answer_images if is_answer else prep.question_images).append(item)
+            images_for_role.append(item)
 
         elif ext == ".pdf":
             pages = _render_pdf(path)
             if not pages:
                 raise ValueError(f"PDF '{path.name}' rendered to zero pages")
-            target = prep.answer_images if is_answer else prep.question_images
-            target.extend((png, "image/png") for png in pages)
+            images_for_role.extend((png, "image/png") for png in pages)
 
         elif ext == ".docx":
             text = _extract_docx_text(path)
@@ -222,11 +261,14 @@ def prepare_attachments(
                 logger.warning('{"event":"docx_empty","file":"%s"}' % path.name)
                 prep.warnings.append(f"DOCX '{path.name}' contained no extractable text")
             else:
-                header = (
-                    f"[Typed document: {path.name}]" if not is_answer
-                    else f"[Student typed answer document: {path.name}]"
-                )
-                prep.extra_text += f"\n\n{header}\n{text}"
+                # Question-paper text merges into the question statement itself,
+                # so it needs no role header; answer/rubric docs are labeled.
+                header = {
+                    "answer": f"[Student typed answer document: {path.name}]\n",
+                    "rubric": f"[Rubric document: {path.name}]\n",
+                    "question": "",
+                }[role]
+                append_text(f"\n\n{header}{text}")
 
         elif ext == ".xlsx":
             sheets = _extract_xlsx_sheets(path)
@@ -234,26 +276,32 @@ def prepare_attachments(
             if not table.strip():
                 logger.warning('{"event":"xlsx_empty","file":"%s"}' % path.name)
                 prep.warnings.append(f"XLSX '{path.name}' contained no extractable content")
+            elif role == "rubric":
+                prep.rubric_extra_text += f"\n\n[Rubric spreadsheet: {path.name}]\n{table}"
             else:
-                prep.extra_text += f"\n\n{table}"
+                append_text(f"\n\n{table}")
 
         elif ext == ".xls":
             text = _extract_xls_text(path)
             if not text:
                 logger.warning('{"event":"xls_empty","file":"%s"}' % path.name)
                 prep.warnings.append(f"XLS '{path.name}' contained no extractable content")
+            elif role == "rubric":
+                prep.rubric_extra_text += f"\n\n[Rubric spreadsheet: {path.name}]\n{text}"
             else:
-                header = f"[Spreadsheet: {path.name}]"
-                prep.extra_text += f"\n\n{header}\n{text}"
+                header = f"[Student typed answer document: {path.name}]" if role == "answer" else f"[Spreadsheet: {path.name}]"
+                append_text(f"\n\n{header}\n{text}")
 
         else:
             raise ValueError(
                 f"Unsupported file extension '{ext}' ({path.name}) — expected PDF, PNG, JPG, DOCX, XLSX or XLS"
             )
 
+    for p in rubric_paths:
+        convert(p, role="rubric")
     for p in question_paths:
-        convert(p, is_answer=False)
+        convert(p, role="question")
     for p in answer_paths:
-        convert(p, is_answer=True)
+        convert(p, role="answer")
 
     return prep

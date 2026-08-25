@@ -45,8 +45,11 @@ class IVisionGrader(ABC):
 
     Images arrive as (bytes, media_type) pairs already converted by
     app.attachments (PDFs rendered to page PNGs, correct MIME types).
-    `extra_text` carries extracted document text (DOCX) that must be
-    included in the prompt before grading.
+    `question_text` is the FULL question statement: the typed متن سؤال merged
+    with any extracted question-document text. `extra_text` carries extracted
+    student-answer document text; `rubric_text`/`rubric_images` carry the
+    uploaded rubric document (text extraction / rendered pages) which must be
+    shown as rubric material, not as part of the question.
     """
 
     @abstractmethod
@@ -61,6 +64,8 @@ class IVisionGrader(ABC):
         temperature: float,
         prompt_version: str,
         extra_text: str = "",
+        rubric_text: str = "",
+        rubric_images: list[tuple[bytes, str]] | None = None,
     ) -> GradingResult:
         """Grade one student answer against one question + rubric.
 

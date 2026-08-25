@@ -76,10 +76,11 @@ public record GradingServiceRequest(
     GradingRubricDto Rubric,
     IReadOnlyList<string> AnswerImagePaths,
     IReadOnlyList<string> QuestionImagePaths,
-    decimal MaxScore,
-    decimal Temperature,
-    string PromptVersion,
-    string? Provider
+    IReadOnlyList<string>? RubricFilePaths = null,
+    decimal MaxScore = 0,
+    decimal Temperature = 0,
+    string PromptVersion = "default",
+    string? Provider = null
 );
 
 public record GradingRubricDto(IReadOnlyList<GradingCriterionDto> Criteria);

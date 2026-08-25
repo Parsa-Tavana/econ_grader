@@ -39,10 +39,11 @@ public sealed class GradingClient : IGradingClient
         {
             student_id = request.StudentId,
             question_id = request.QuestionId,
-            question_text = request.QuestionText,
+            question_text = request.QuestionText ?? string.Empty,
             rubric = new { criteria = request.Rubric.Criteria.Select(c => new { id = c.Id, description = c.Description, max_score = c.MaxScore }) },
             answer_image_paths = request.AnswerImagePaths,
             question_image_paths = request.QuestionImagePaths,
+            rubric_file_paths = request.RubricFilePaths ?? Array.Empty<string>(),
             max_score = request.MaxScore,
             temperature = request.Temperature,
             prompt_version = request.PromptVersion,

@@ -32,16 +32,22 @@ class GeminiVisionGrader(IVisionGrader):
         temperature: float,
         prompt_version: str,
         extra_text: str = "",
+        rubric_text: str = "",
+        rubric_images: list[tuple[bytes, str]] | None = None,
     ) -> GradingResult:
         start_ms = time.time()
         model_name = settings.GEMINI_MODEL or settings.MODEL_NAME
         prompt_text = load_prompt(prompt_version)
+        rubric_images = rubric_images or []
 
         parts: list[Any] = []
-        for data, media_type in [*question_images, *answer_images]:
+        # Order matters: question paper → student answer → rubric document → prompt.
+        for data, media_type in [*question_images, *answer_images, *rubric_images]:
             parts.append(types.Part.from_bytes(data=data, mime_type=media_type))
         if extra_text.strip():
-            parts.append(types.Part.from_text(text=f"Additional documents:\n{extra_text.strip()}"))
+            parts.append(types.Part.from_text(text=f"Student typed answer documents:\n{extra_text.strip()}"))
+        if rubric_text.strip():
+            parts.append(types.Part.from_text(text=f"Rubric document:\n{rubric_text.strip()}"))
         parts.append(types.Part.from_text(text=prompt_text.format(
             question_text=question_text,
             rubric_json=json.dumps(rubric, indent=2),

@@ -66,29 +66,38 @@ public sealed class GradingOrchestrationService : IGradingOrchestrationService
 
         var rubric = await GetActiveRubricAsync(answer.QuestionId, ct);
 
-        // Attach every stored file that exists on disk. The Python service /
-        // provider layer decides how to represent each (image vs rendered
-        // pages vs extracted text) based on its own capabilities.
-        var filePaths = new List<string>();
-        void AddIfPresent(string? key)
+        // Attach every stored file that exists on disk, keeping roles apart:
+        // question-paper files become part of the question statement (merged
+        // with the typed question text by the grading service), rubric files
+        // are routed as rubric material.
+        var questionFiles = new List<string>();
+        var rubricFiles = new List<string>();
+        void AddIfPresent(string? key, List<string> target)
         {
             if (!string.IsNullOrEmpty(key) && _storage.Exists(key))
-                filePaths.Add(_storage.GetAbsolutePath(key));
+                target.Add(_storage.GetAbsolutePath(key));
         }
-        AddIfPresent(answer.Question.FileStorageKey);   // question paper
-        AddIfPresent(rubric.FileStorageKey);            // rubric document
-        AddIfPresent(answer.ImageStorageKey);           // student answer
+        AddIfPresent(answer.Question.FileStorageKey, questionFiles);   // question paper
+        AddIfPresent(rubric.FileStorageKey, rubricFiles);              // rubric document
+
+        var answerPath = string.IsNullOrEmpty(answer.ImageStorageKey) || !_storage.Exists(answer.ImageStorageKey)
+            ? null
+            : _storage.GetAbsolutePath(answer.ImageStorageKey);
+        if (answerPath is null)
+            throw new NotFoundException("Answer image", answerId);
 
         var request = new GradingServiceRequest(
             StudentId: answer.Student.ExternalId,
             QuestionId: answer.QuestionId.ToString(),
-            QuestionText: answer.Question.Text,
+            QuestionText: answer.Question.Text ?? string.Empty,
             Rubric: new GradingRubricDto(rubric.Criteria.Select(c =>
                 new GradingCriterionDto(c.CriterionId, c.Description, c.MaxScore)).ToList()),
-            AnswerImagePaths: new[] { _storage.GetAbsolutePath(answer.ImageStorageKey) },
-            // All supporting documents (question paper + rubric doc) ride along;
-            // the grading service routes them to the AI per provider capability.
-            QuestionImagePaths: filePaths.Where(p => p != _storage.GetAbsolutePath(answer.ImageStorageKey)).ToArray(),
+            AnswerImagePaths: new[] { answerPath },
+            // Question paper rides as question material; the grading service
+            // merges its extracted text into the question statement per
+            // provider capability.
+            QuestionImagePaths: questionFiles.ToArray(),
+            RubricFilePaths: rubricFiles.ToArray(),
             MaxScore: answer.Question.MaxScore,
             Temperature: temperature,
             PromptVersion: promptVersion,
@@ -96,8 +105,8 @@ public sealed class GradingOrchestrationService : IGradingOrchestrationService
         );
 
         _logger.LogInformation(
-            "Grading request prepared AnswerId={AnswerId} Files={FileCount} Provider={Provider}",
-            answerId, filePaths.Count, provider ?? "default");
+            "Grading request prepared AnswerId={AnswerId} QuestionFiles={QuestionFiles} RubricFiles={RubricFiles} Provider={Provider}",
+            answerId, questionFiles.Count, rubricFiles.Count, provider ?? "default");
 
         // CRITICAL: teacher score is NEVER sent — only AI's independent view.
         var response = await _gradingClient.GradeAsync(request, ct);
