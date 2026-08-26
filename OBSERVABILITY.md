@@ -4,6 +4,10 @@ How to see (and edit) your database, logs, object storage, and AI API calls
 with graphical tools. Everything here runs **locally only** — all ports are
 bound to `127.0.0.1`, nothing is exposed to your network.
 
+> 🔑 **Addresses, logins and passwords:** see `CREDENTIALS.md` (repo root).
+> It is generated from `.env` and git-ignored because it holds real
+> passwords — this file only documents *how*, never the secrets themselves.
+
 ## Starting the GUI stack
 
 ```bash

@@ -73,6 +73,8 @@ Desktop.ini
 docker-compose.override.yml
 # local-only GUI/observability stack (SSMS port, Dozzle, Filebrowser, Langfuse)
 docker-compose.observability.yml
+# generated local credentials sheet (contains REAL passwords, mirrors .env)
+/CREDENTIALS.md
 
 # Backup output from scripts/backup.sh / backup.ps1 (contains exam data)
 /backups/
