@@ -1,0 +1,24 @@
+# Reverse proxy for the composed stack.
+#
+# The listen address comes from .env (SITE_ADDRESS) and selects the mode:
+#
+#   SITE_ADDRESS=:80                → plain HTTP catch-all (local compose testing;
+#                                     satisfies `curl http://localhost/...`)
+#   SITE_ADDRESS=grader.example.dev → automatic HTTPS via Let's Encrypt + HTTP→HTTPS
+#                                     redirect (.dev is HSTS-preloaded — HTTPS mandatory)
+#
+# Routing: /api/* → .NET API container; everything else → nginx SPA container.
+# api and frontend are internal-only (no host ports) — caddy is the single entry.
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	# API → .NET backend (container-internal name api:8080).
+	handle /api/* {
+		reverse_proxy api:8080
+	}
+
+	# Everything else → the built SPA served by nginx.
+	handle {
+		reverse_proxy frontend:80
+	}
+}

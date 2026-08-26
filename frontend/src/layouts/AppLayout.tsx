@@ -9,6 +9,7 @@ import {
   ChartLine,
   ScrollText,
   Settings,
+  Users,
   Languages,
   Wifi,
   WifiOff,
@@ -17,18 +18,35 @@ import {
 import { clsx } from "clsx";
 import { changeLanguage, type AppLang } from "../i18n";
 import { healthCheck } from "../api/system";
-import { getAuthUser, logout } from "../api/auth";
+import { getAuthUser, logout, type AuthUser } from "../api/auth";
+import { hasRole } from "../utils/roles";
 import { ToastProvider } from "../hooks/useToast";
 
-const NAV_ITEMS = [
+type NavItem = {
+  to: string;
+  key: string;
+  icon: typeof LayoutDashboard;
+  end?: boolean;
+  /** When set, the entry renders only for these roles (mirrors backend [Authorize(Roles=...)]). */
+  roles?: string[];
+};
+
+const NAV_ITEMS: NavItem[] = [
   { to: "/", key: "nav.dashboard", icon: LayoutDashboard, end: true },
   { to: "/exams", key: "nav.exams", icon: BookOpen },
   { to: "/students", key: "nav.students", icon: GraduationCap },
   { to: "/grading/queue", key: "nav.grading", icon: PenLine },
   { to: "/evaluation", key: "nav.evaluation", icon: ChartLine },
-  { to: "/audit", key: "nav.audit", icon: ScrollText },
+  // Audit log + user management are admin-only server-side ([Authorize(Roles="Admin")]).
+  { to: "/audit", key: "nav.audit", icon: ScrollText, roles: ["Admin"] },
+  { to: "/users", key: "nav.users", icon: Users, roles: ["Admin"] },
   { to: "/settings", key: "nav.settings", icon: Settings },
 ];
+
+/** Role filter shared by the desktop sidebar and the mobile top-nav. */
+function canSee(user: AuthUser | null, item: NavItem): boolean {
+  return !item.roles || hasRole(user, ...item.roles);
+}
 
 function LanguageToggle() {
   const { i18n, t } = useTranslation();
@@ -116,6 +134,8 @@ function UserMenu() {
 
 export default function AppLayout() {
   const { t } = useTranslation();
+  const user = getAuthUser();
+  const visibleNav = NAV_ITEMS.filter((item) => canSee(user, item));
 
   return (
     <ToastProvider>
@@ -134,7 +154,7 @@ export default function AppLayout() {
             </div>
           </div>
           <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-3">
-            {NAV_ITEMS.map(({ to, key, icon: Icon, end }) => (
+            {visibleNav.map(({ to, key, icon: Icon, end }) => (
               <NavLink
                 key={to}
                 to={to}
@@ -159,7 +179,7 @@ export default function AppLayout() {
         <div className="flex min-h-screen flex-1 flex-col md:ms-56">
           <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-zinc-200 bg-white/90 px-4 backdrop-blur md:px-6">
             <nav className="-mx-1 flex items-center gap-1 overflow-x-auto md:hidden">
-              {NAV_ITEMS.slice(0, 4).map(({ to, key, end }) => (
+              {visibleNav.slice(0, 4).map(({ to, key, end }) => (
                 <NavLink
                   key={to}
                   to={to}

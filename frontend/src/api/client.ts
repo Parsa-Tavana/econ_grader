@@ -10,35 +10,22 @@ export const api = axios.create({
 });
 
 /**
- * JWT bearer auth — identity comes from the token's claims, never from
- * headers. Kept for the few UI flows that still reference a local user id
- * (Settings identity card); new code should use getAuthUser() from auth.ts.
+ * JWT bearer auth — identity comes exclusively from the token's claims
+ * (sub / role / email); the backend derives the acting user from the
+ * validated JWT. No identity headers are sent.
  */
-let currentUserId: string | null = localStorage.getItem("econgrader.userId");
 
 const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Strict GUID check — kept for legacy flows that display/validate ids. */
+/** Strict GUID check (used by filters and form validation). */
 export function isValidGuid(value: string | null | undefined): boolean {
   return !!value && GUID_RE.test(value.trim());
-}
-
-export function setUserId(id: string | null) {
-  currentUserId = id;
-  if (id) localStorage.setItem("econgrader.userId", id);
-  else localStorage.removeItem("econgrader.userId");
-}
-
-export function getUserId(): string | null {
-  return currentUserId;
 }
 
 /** Attach the JWT to every request; 401 → session cleared + login redirect. */
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("econgrader.token");
   if (token) config.headers.Authorization = `Bearer ${token}`;
-  // Legacy header retained so old backend builds keep attributing actions.
-  if (currentUserId) config.headers["X-User-Id"] = currentUserId;
   return config;
 });
 

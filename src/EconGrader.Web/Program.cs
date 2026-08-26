@@ -1,6 +1,9 @@
 using System.Security.Claims;
 using System.Text;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
@@ -37,9 +40,66 @@ try
     var fileStorageRoot = builder.Configuration["FileStorage:RootPath"] ?? Path.Combine(AppContext.BaseDirectory, "storage", "images");
 
     // CORS: comma-separated allowed origins (e.g. "http://localhost:5173,https://grader.example.com").
-    // "*" allows any origin — dev convenience only; set explicit origins in production.
-    var corsOrigins = (builder.Configuration["Cors:AllowedOrigins"] ?? "*")
+    // DEFAULT-DENY: when unset we deliberately do NOT fall back to AllowAnyOrigin —
+    // same-origin deployments (SPA served behind the same reverse proxy) need no
+    // CORS at all. Explicit "*" still enables it (dev escape hatch), with a warning.
+    var corsOrigins = (builder.Configuration["Cors:AllowedOrigins"] ?? "")
         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    if (corsOrigins.Length == 0)
+    {
+        Log.Warning(
+            "Cors:AllowedOrigins is not configured — cross-origin browser calls will be rejected " +
+            "(correct for same-origin deployments where the proxy serves both SPA and /api). " +
+            "Set it to comma-separated origins if the SPA is hosted elsewhere.");
+    }
+    else if (corsOrigins.Length == 1 && corsOrigins[0] == "*")
+    {
+        Log.Warning("Cors:AllowedOrigins=\"*\" allows ANY origin — acceptable for local development only.");
+    }
+
+    // Behind a reverse proxy (caddy) the socket peer is the proxy container;
+    // trust X-Forwarded-For/Proto so audit rows and logs record real client IPs.
+    builder.Services.Configure<ForwardedHeadersOptions>(options =>
+    {
+        options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+        // Container pattern: accept forwarded headers from any network hop,
+        // because the proxy's container IP is unpredictable across deployments.
+        options.KnownNetworks.Clear();
+        options.KnownProxies.Clear();
+    });
+
+    // Brute-force protection: strict fixed-window limit per client IP on the
+    // unauthenticated auth endpoints (login + bootstrap-admin). Applied as the
+    // global limiter with a path filter — see UseRateLimiter below.
+    builder.Services.AddRateLimiter(options =>
+    {
+        options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+        options.OnRejected = static (context, _) =>
+        {
+            context.HttpContext.Response.Headers.RetryAfter = "60";
+            return ValueTask.CompletedTask;
+        };
+        options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
+        {
+            var path = httpContext.Request.Path;
+            var isAuthAttempt = HttpMethods.IsPost(httpContext.Request.Method)
+                && (path.StartsWithSegments("/api/auth/login")
+                    || path.StartsWithSegments("/api/auth/bootstrap-admin"));
+            if (!isAuthAttempt)
+                return RateLimitPartition.GetNoLimiter(string.Empty);
+
+            // UseForwardedHeaders runs first in the pipeline, so RemoteIpAddress
+            // is the real client IP (not the proxy) by the time this executes.
+            var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            return RateLimitPartition.GetFixedWindowLimiter(ip, _ =>
+                new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 10,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0, // reject immediately — no queue on a brute-force surface
+                });
+        });
+    });
 
     // ── EF Core (SQL Server) ────────────────────────────────────────────────
     builder.Services.AddDbContext<AppDbContext>(options =>
@@ -60,6 +120,15 @@ try
     builder.Services.AddScoped<IAuditLogger, AuditLogger>();
 
     // ── Python grading service (HttpClient + abstraction) ────────────────────
+    // InternalKey (GRADING_INTERNAL_KEY in .env) is sent as X-Internal-Key on
+    // every call; the header is attached in GradingClient's constructor via
+    // DefaultRequestHeaders. Empty key + Python ENVIRONMENT=production → the
+    // Python side rejects everything (fail-closed).
+    builder.Services.Configure<GradingServiceOptions>(opts =>
+    {
+        opts.BaseUrl = gradingServiceBaseUrl;
+        opts.InternalKey = builder.Configuration["GradingService:InternalKey"];
+    });
     builder.Services.AddHttpClient<IGradingClient, GradingClient>(client =>
         {
             client.BaseAddress = new Uri(gradingServiceBaseUrl);
@@ -79,12 +148,25 @@ try
     builder.Services.AddScoped<EvaluationService>();
 
     // ── Authentication: bearer JWT (identity NEVER from headers) ─────────────
-    // Empty counts as missing: an empty env-var override must never yield a
-    // zero-length HMAC key (tokens signed with it would validate against "").
+    // Fail-fast on unsafe keys BEFORE any request can be served:
+    //   - missing/empty → always fatal;
+    //   - the publicly known dev literal → fatal in Production (anyone could
+    //     forge an Admin token). Development keeps using it via
+    //     appsettings.Development.json so bare `dotnet run` still works.
     var jwtSigningKey = builder.Configuration["Jwt:SigningKey"];
     if (string.IsNullOrWhiteSpace(jwtSigningKey))
         throw new InvalidOperationException(
             "Missing Jwt:SigningKey. Generate one with: openssl rand -base64 48  (or set JWT_SIGNING_KEY in .env)");
+    const string DevSigningKeyLiteral =
+        "dev-only-signing-key-change-me-in-production-0123456789abcdef0123456789abcdef";
+    if (!builder.Environment.IsDevelopment() &&
+        string.Equals(jwtSigningKey.Trim(), DevSigningKeyLiteral, StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException(
+            "Jwt:SigningKey is set to the PUBLIC dev default while running outside Development — " +
+            "anyone could forge an admin token. Generate a real key: openssl rand -base64 48, " +
+            "then set JWT_SIGNING_KEY in .env.");
+    }
     var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "econgrader";
     var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "econgrader-api";
 
@@ -131,7 +213,12 @@ try
     // ── CORS ─────────────────────────────────────────────────────────────────
     builder.Services.AddCors(o =>
     {
-        if (corsOrigins.Length == 1 && corsOrigins[0] == "*")
+        if (corsOrigins.Length == 0)
+        {
+            // Default-deny: no CORS policy at all. Same-origin requests are
+            // unaffected; cross-origin browser calls get no CORS headers.
+        }
+        else if (corsOrigins.Length == 1 && corsOrigins[0] == "*")
         {
             o.AddDefaultPolicy(policy => policy.AllowAnyOrigin());
         }
@@ -151,16 +238,29 @@ try
     var app = builder.Build();
 
     // ── Pipeline ─────────────────────────────────────────────────────────────
-    // Correlation ID first so every downstream log line and error payload
+    // Forwarded headers MUST run first: every downstream component (request
+    // logging, audit attribution, rate limiter partitioning) needs the real
+    // client IP/proto, not the proxy container's.
+    app.UseForwardedHeaders();
+    // Correlation ID so every downstream log line and error payload
     // can carry it (frontend shows it on failures for easy tracing).
     app.UseMiddleware<CorrelationIdMiddleware>();
     app.UseSerilogRequestLogging();
     // Single place translating exceptions → HTTP problem responses.
     app.UseMiddleware<ExceptionHandlingMiddleware>();
+    // Auth endpoints (login/bootstrap) are IP-rate-limited; everything else
+    // passes through the global NoLimiter partition untouched.
+    app.UseRateLimiter();
 
     if (app.Environment.IsDevelopment())
     {
         app.MapOpenApi();
+    }
+    else
+    {
+        // .dev is HSTS-preloaded; the proxy terminates TLS but the API must
+        // still declare the policy for direct-HTTP clients.
+        app.UseHsts();
     }
 
     app.UseHttpsRedirection();

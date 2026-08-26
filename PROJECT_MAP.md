@@ -295,48 +295,55 @@ All FKs use `Restrict`/`Cascade` as configured in `AppDbContext.OnModelCreating`
 ## 7. Configuration & How To Run
 
 ### .NET `src/EconGrader.Web/appsettings.json`
-- `ConnectionStrings:DefaultConnection` — SQL Server (`Server=localhost,1433;Database=EconGrader;User=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=True` in dev)
+- `ConnectionStrings:DefaultConnection` — SQL Server; real credentials live ONLY in gitignored `appsettings.Development.json` (local dev) or the compose env (`ConnectionStrings__DefaultConnection`). Compose runs as least-privilege login `econgrader_app` (created by `scripts/init-db.sql`), not sa.
 - `GradingService:BaseUrl` — `http://localhost:5001` dev / `http://grading:5001` Docker
 - `FileStorage:RootPath` — default `storage/images`
 - `Serilog` — console + daily rolling file in `logs/`
 
-Program.cs wiring: Serilog bootstrap → controllers + JSON camelCase → EF Core SQL Server (**EnableRetryOnFailure**, migrations assembly = Web) → scoped services (ExamService, QuestionService, AnswerService, GradingOrchestrationService, TeacherReviewService, EvaluationService) → `IFileStorage`=LocalFileStorage, `IAuditLogger`=AuditLogger → typed `HttpClient` resilience pipeline for `IGradingClient` → 50MB multipart limit → auto-migrate on startup.
+Program.cs wiring: Serilog bootstrap → **UseForwardedHeaders** (X-Forwarded-For/Proto, KnownNetworks/KnownProxies cleared — container pattern; runs first so audit IPs are real clients) → controllers + JSON camelCase → EF Core SQL Server (**EnableRetryOnFailure**, migrations assembly = Web) → scoped services (ExamService, QuestionService, AnswerService, GradingOrchestrationService, TeacherReviewService, EvaluationService) → `IFileStorage`=LocalFileStorage, `IAuditLogger`=AuditLogger → typed `HttpClient` resilience pipeline for `IGradingClient` → 50MB multipart limit → auto-migrate on startup. Pipeline also: `UseHsts()` outside Development; `UseRateLimiter()` — fixed-window 10 req/min per client IP on POST `/api/auth/login` + POST `/api/auth/bootstrap-admin` → 429 with `Retry-After: 60`; CORS is default-deny (`Cors:AllowedOrigins` unset = no CORS policy + startup warning; explicit `*` = AllowAnyOrigin + warning).
 
 ### Python `grading-service/.env` (template in `.env.example`)
 `MODEL_PROVIDER`, `MODEL_NAME`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `QWEN_BASE_URL`, `QWEN_API_KEY`, `DEFAULT_TEMPERATURE`, `DEFAULT_MAX_TOKENS`, `IMAGE_STORAGE_ROOT`, `PROMPTS_DIR`, `LOG_LEVEL`.
 
+### Anthropic endpoint modes (docker compose)
+The base `docker-compose.yml` calls **api.anthropic.com directly** (`MODEL_NAME=claude-sonnet-4-5`, no `ANTHROPIC_BASE_URL`). To route Claude traffic through a local gateway instead:
+
+1. Copy `docker-compose.override.yml.example` → `docker-compose.override.yml` (git-ignored).
+2. It sets `ANTHROPIC_BASE_URL=http://host.docker.internal:20128/v1` + `CLAUDE_MODEL=claude-econ` — the 9router desktop proxy listening on the host at port 20128.
+   - `host.docker.internal`, never `localhost`: the grading container must reach the host process; inside the container localhost is itself.
+   - The `/v1` suffix and a model alias the gateway actually proxies (`claude-econ`) are required.
+3. `docker compose up` merges the override automatically; delete/rename the file to return to direct-API mode.
+
 ### Run modes
 ```bash
-# Full stack
-docker compose up --build        # db:1433 · grading:5001 · api:8080
+# Full stack (caddy proxy :80/:443 → SPA + API; see Caddyfile)
+docker compose up --build        # proxy:80/443 · frontend (internal) · api:8080 · grading:5001 · db:1433
 
-# Local dev (two terminals + SQL Server)
+# Local dev (two terminals + SQL Server) — unchanged, no caddy/nginx involved
 dotnet run --project src/EconGrader.Web          # auto-migrates on boot
 cd grading-service && uvicorn app.main:app --host 0.0.0.0 --port 5001
+npm run dev                       # in frontend/ — Vite :5173 proxies /api → localhost:8080
 ```
+
+### Production topology (compose)
+`Caddyfile` routes `${SITE_ADDRESS}`: `/api/*` → `api:8080`, everything else → the built SPA served by nginx (`frontend/Dockerfile`: node:20-alpine build → nginx:alpine, gzip, immutable `/assets/` cache, no-cache `index.html`, SPA fallback). `api` and `frontend` have no host ports — caddy is the single entry point (`SITE_ADDRESS=:80` local HTTP testing; a real `.dev` hostname gets automatic Let's Encrypt HTTPS — .dev is HSTS-preloaded). The api's `8080:8080` host mapping stays published only so the **local Vite dev proxy** keeps working. New env var: `SITE_ADDRESS` in `.env`. Secrets/restart policies/log shipping/backups are deferred (Prompt 2B).
 
 ---
 
-## 8. Known Gaps / Frontend Build Brief
+## 8. Known Gaps
 
-1. **No authentication yet** — identity is a trusted `X-User-Id` header. The `Users` table exists for later real auth.
-2. **No frontend** — build a SPA against §4 endpoints. Suggested pages:
-   - *Exams* list/detail with question editor + active rubric editor (versioned)
-   - *Students* management
-   - *Upload* flow (multipart POST `/api/answers/upload`)
-   - **Grading workspace** (core screen): answer scan (`/api/answers/{id}/image`) beside latest run result (`/api/grading/run/{id}`), per-criterion breakdown parsed from `criteriaScoresJson`, Accept / Override buttons → review endpoints, run-history timeline, "Run AI grading" button → POST `/run`
-   - *Evaluation dashboards* from `/api/evaluation/*`
-   - *Audit viewer*
-3. **CORS not configured yet** — add `AddCors` for the frontend origin during UI work.
-4. Ensemble median returned by POST `/run` is computed in the controller, not persisted.
-5. `ModelConfigs` has no admin endpoint yet.
+1. Ensemble median returned by POST `/run` is computed in the controller, not persisted.
+2. `ModelConfigs` has no admin endpoint yet.
+3. Production hardening still open (Prompt 2B): non-default SA password + secrets management, container restart policies, centralized log shipping, DB backup jobs, TLS certificate storage strategy beyond caddy defaults.
 
 ## 9. Verification Commands
 
 ```bash
 dotnet build                                                          # 0 errors, 0 warnings
-cd grading-service && ../.venv/Scripts/python.exe -m pytest tests -q  # 15 passed
+cd grading-service && python -m pytest tests -q                       # 24 passed
 dotnet ef migrations list --project src/EconGrader.Web                # InitialCreate present
 docker compose up --build                                             # full stack up
+curl http://localhost/api/health                                      # {"status":"ok",...gradingService.up:true}
+curl http://localhost/                                                # serves the SPA (200 text/html)
 ```
 

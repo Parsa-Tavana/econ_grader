@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -26,6 +26,7 @@ from .attachments import prepare_attachments
 from .cost import estimate_cost
 from .prompts.loader import list_prompt_versions, load_prompt
 from .evaluation import compute_metrics, aggregate_by_provider
+from .internal_auth import require_internal_key
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
@@ -86,12 +87,12 @@ def health():
     )
 
 
-@app.get("/prompts", tags=["prompts"])
+@app.get("/prompts", tags=["prompts"], dependencies=[Depends(require_internal_key)])
 def list_prompts():
     return {"prompts": list_prompt_versions()}
 
 
-@app.get("/prompts/{version}", tags=["prompts"])
+@app.get("/prompts/{version}", tags=["prompts"], dependencies=[Depends(require_internal_key)])
 def get_prompt(version: str):
     try:
         text = load_prompt(version)
@@ -100,7 +101,7 @@ def get_prompt(version: str):
         raise HTTPException(status_code=404, detail=str(exc))
 
 
-@app.post("/grade", response_model=GradeResponse, tags=["grading"])
+@app.post("/grade", response_model=GradeResponse, tags=["grading"], dependencies=[Depends(require_internal_key)])
 async def grade(req: GradeRequest):
     """Grade one handwritten/typed answer. Teacher score is NEVER required or used."""
     t0 = time.time()
@@ -202,7 +203,7 @@ async def grade(req: GradeRequest):
     return resp
 
 
-@app.post("/evaluate", tags=["evaluation"])
+@app.post("/evaluate", tags=["evaluation"], dependencies=[Depends(require_internal_key)])
 def evaluate(req: EvaluationRequest):
     pairs = [(r.get("teacher_score"), r.get("ai_score")) for r in req.runs]
     filtered = [(float(t), float(a)) for t, a in pairs if t is not None and a is not None]
@@ -217,7 +218,7 @@ def evaluate(req: EvaluationRequest):
     return m.__dict__
 
 
-@app.post("/evaluate/by-provider", tags=["evaluation"])
+@app.post("/evaluate/by-provider", tags=["evaluation"], dependencies=[Depends(require_internal_key)])
 def evaluate_by_provider(req: EvaluationRequest):
     return {k: v.__dict__ for k, v in aggregate_by_provider(req.runs).items()}
 

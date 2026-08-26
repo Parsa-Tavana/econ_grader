@@ -18,6 +18,12 @@ interface FileAttachmentProps {
   fileUrl: string | null;
   onUpload: (file: File) => Promise<void>;
   onDelete: () => Promise<void>;
+  /**
+   * When false, upload/replace/delete controls are hidden (read-only link
+   * only) — mirrors the backend's Teacher-only file mutation endpoints.
+   * Defaults to true.
+   */
+  canEdit?: boolean;
 }
 
 /** Inline icon for the stored file type. */
@@ -40,6 +46,7 @@ export function FileAttachment({
   fileUrl,
   onUpload,
   onDelete,
+  canEdit = true,
 }: FileAttachmentProps) {
   const { t } = useTranslation();
   const toast = useToast();
@@ -130,14 +137,18 @@ export function FileAttachment({
               <Download size={13} />
             </Button>
           </a>
-          <Button size="sm" variant="ghost" onClick={() => inputRef.current?.click()} disabled={busy}>
-            <Upload size={13} /> {t("files.replace")}
-          </Button>
-          <Button size="sm" variant="ghost" className="text-red-600 hover:bg-red-50" onClick={handleDelete} disabled={busy}>
-            <Trash2 size={13} />
-          </Button>
+          {canEdit ? (
+            <>
+              <Button size="sm" variant="ghost" onClick={() => inputRef.current?.click()} disabled={busy}>
+                <Upload size={13} /> {t("files.replace")}
+              </Button>
+              <Button size="sm" variant="ghost" className="text-red-600 hover:bg-red-50" onClick={handleDelete} disabled={busy}>
+                <Trash2 size={13} />
+              </Button>
+            </>
+          ) : null}
         </div>
-      ) : (
+      ) : canEdit ? (
         <label
           className={clsx(
             "mt-2 inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-dashed border-zinc-300 px-3 py-2 text-xs font-medium text-zinc-600 transition hover:border-primary-300 hover:text-primary-700",
@@ -155,7 +166,7 @@ export function FileAttachment({
             disabled={busy}
           />
         </label>
-      )}
+      ) : null}
 
       {/* Hidden input kept mounted so Replace works without re-render tricks */}
       {fileName ? (

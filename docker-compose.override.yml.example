@@ -1,0 +1,18 @@
+# Example of the git-ignored docker-compose.override.yml used to route the
+# grading service through a LOCAL gateway (9router desktop proxy on the host)
+# instead of calling api.anthropic.com directly.
+#
+# To use: copy this file to docker-compose.override.yml and `docker compose up`.
+# To stop using it: delete or rename docker-compose.override.yml — compose
+# merges the override file automatically whenever it exists.
+#
+# Why host.docker.internal? The grading container must reach the gateway
+# process on the Docker HOST; localhost inside the container is the container
+# itself. Port 20128 and the claude-econ alias are the values configured in
+# the local 9router instance.
+services:
+  grading:
+    environment:
+      - ANTHROPIC_BASE_URL=http://host.docker.internal:20128/v1
+      - CLAUDE_MODEL=claude-econ
+      - MODEL_NAME=claude-econ

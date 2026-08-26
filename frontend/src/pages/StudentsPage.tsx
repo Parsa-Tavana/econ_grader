@@ -21,12 +21,16 @@ import { timeAgo } from "../utils/format";
 import { currentLang } from "../hooks/useLang";
 import { useDebounce } from "../hooks/useDebounce";
 import { useToast } from "../hooks/useToast";
+import { getAuthUser } from "../api/auth";
+import { hasRole } from "../utils/roles";
 
 export default function StudentsPage() {
   const { t } = useTranslation();
   const lang = currentLang();
   const qc = useQueryClient();
   const toast = useToast();
+  // Student create is Teacher-only server-side — hide the control.
+  const canCreate = hasRole(getAuthUser(), "Teacher");
   const studentsQ = useQuery({ queryKey: ["students"], queryFn: listStudents });
 
   const [search, setSearch] = useState("");
@@ -72,9 +76,11 @@ export default function StudentsPage() {
         title={t("students.title")}
         subtitle={t("students.subtitle")}
         action={
-          <Button onClick={() => setShowCreate(true)}>
-            <Plus size={16} /> {t("students.addStudent")}
-          </Button>
+          canCreate ? (
+            <Button onClick={() => setShowCreate(true)}>
+              <Plus size={16} /> {t("students.addStudent")}
+            </Button>
+          ) : undefined
         }
       />
 

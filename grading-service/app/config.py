@@ -31,7 +31,14 @@ class Settings(BaseSettings):
     
     # Logging
     LOG_LEVEL: str = "INFO"
-    
+
+    # Internal service auth: the .NET API sends X-Internal-Key on every call.
+    # Empty key + ENVIRONMENT=production → protected endpoints reject ALL
+    # requests (fail-closed). In non-production (local bare-metal dev) an empty
+    # key disables the check entirely so `uvicorn app.main:app` still works.
+    GRADING_INTERNAL_KEY: str = ""
+    ENVIRONMENT: str = "development"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

@@ -22,6 +22,8 @@ import {
 import { formatNumber, timeAgo } from "../utils/format";
 import { currentLang } from "../hooks/useLang";
 import { useToast } from "../hooks/useToast";
+import { getAuthUser } from "../api/auth";
+import { hasRole } from "../utils/roles";
 
 interface ExamForm {
   name: string;
@@ -40,6 +42,8 @@ export default function ExamsPage() {
   const lang = currentLang();
   const qc = useQueryClient();
   const toast = useToast();
+  // Exam create/edit/delete are Teacher-only server-side — hide the controls.
+  const canManage = hasRole(getAuthUser(), "Teacher");
 
   const examsQ = useQuery({ queryKey: ["exams"], queryFn: listExams });
 
@@ -123,9 +127,11 @@ export default function ExamsPage() {
         title={t("exams.title")}
         subtitle={t("exams.subtitle")}
         action={
-          <Button onClick={openCreate}>
-            <Plus size={16} /> {t("exams.createExam")}
-          </Button>
+          canManage ? (
+            <Button onClick={openCreate}>
+              <Plus size={16} /> {t("exams.createExam")}
+            </Button>
+          ) : undefined
         }
       />
 
@@ -155,18 +161,22 @@ export default function ExamsPage() {
                     <ChevronDown size={14} /> {t("exams.openExam")}
                   </Button>
                 </Link>
-                <Button variant="ghost" size="sm" onClick={() => openEdit(e.id)} aria-label={t("common.edit")}>
-                  <Edit2 size={14} />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-red-600 hover:bg-red-50"
-                  onClick={() => setDeleteTarget(e.id)}
-                  aria-label={t("common.delete")}
-                >
-                  <Trash2 size={14} />
-                </Button>
+                {canManage ? (
+                  <>
+                    <Button variant="ghost" size="sm" onClick={() => openEdit(e.id)} aria-label={t("common.edit")}>
+                      <Edit2 size={14} />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-red-600 hover:bg-red-50"
+                      onClick={() => setDeleteTarget(e.id)}
+                      aria-label={t("common.delete")}
+                    >
+                      <Trash2 size={14} />
+                    </Button>
+                  </>
+                ) : null}
               </div>
             </Card>
           ))}

@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom";
 import AppLayout from "./layouts/AppLayout";
-import LoginPage, { isLoggedIn } from "./pages/LoginPage";
+import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
 import ExamsPage from "./pages/ExamsPage";
 import ExamDetailPage from "./pages/ExamDetailPage";
@@ -11,7 +11,9 @@ import WorkspacePage from "./pages/WorkspacePage";
 import EvaluationPage from "./pages/EvaluationPage";
 import AuditPage from "./pages/AuditPage";
 import SettingsPage from "./pages/SettingsPage";
-import { getAuthUser } from "./api/auth";
+import UsersPage from "./pages/UsersPage";
+import { getAuthUser, isLoggedIn } from "./api/auth";
+import { isAdmin } from "./utils/roles";
 
 /** Blocks unauthenticated access; remembers where the user was headed. */
 function RequireAuth() {
@@ -23,10 +25,10 @@ function RequireAuth() {
   return <Outlet />;
 }
 
-/** Admin-only subtree (audit log). Teachers bounce to the dashboard. */
+/** Admin-only subtree (audit log, user management). Others bounce to the dashboard. */
 function RequireAdmin() {
   const user = getAuthUser();
-  if (user?.role !== "Admin") return <Navigate to="/" replace />;
+  if (!isAdmin(user)) return <Navigate to="/" replace />;
   return <Outlet />;
 }
 
@@ -46,6 +48,7 @@ export default function App() {
           <Route path="evaluation" element={<EvaluationPage />} />
           <Route element={<RequireAdmin />}>
             <Route path="audit" element={<AuditPage />} />
+            <Route path="users" element={<UsersPage />} />
           </Route>
           <Route path="settings" element={<SettingsPage />} />
         </Route>

@@ -50,6 +50,8 @@ import {
 import { formatScore, formatNumber } from "../utils/format";
 import { currentLang } from "../hooks/useLang";
 import { useToast } from "../hooks/useToast";
+import { getAuthUser } from "../api/auth";
+import { hasRole } from "../utils/roles";
 
 interface RubricCriterionInput {
   description: string;
@@ -75,6 +77,8 @@ export default function ExamDetailPage() {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const toast = useToast();
+  // Question/rubric/file mutations are Teacher-only server-side — hide the controls.
+  const canManage = hasRole(getAuthUser(), "Teacher");
 
   const examQ = useQuery({ queryKey: ["exam", examId], queryFn: () => getExam(examId) });
   const questionsQ = useQuery({
@@ -184,9 +188,11 @@ export default function ExamDetailPage() {
                 <ArrowLeft size={16} /> {t("common.back")}
               </Button>
             </Link>
-            <Button onClick={openCreateQuestion}>
-              <Plus size={16} /> {t("questions.addQuestion")}
-            </Button>
+            {canManage ? (
+              <Button onClick={openCreateQuestion}>
+                <Plus size={16} /> {t("questions.addQuestion")}
+              </Button>
+            ) : null}
           </div>
         }
       />
@@ -197,9 +203,11 @@ export default function ExamDetailPage() {
             title={t("questions.title")}
             hint={t("exams.noExamsHint")}
             action={
-              <Button onClick={openCreateQuestion}>
-                <Plus size={15} /> {t("questions.addQuestion")}
-              </Button>
+              canManage ? (
+                <Button onClick={openCreateQuestion}>
+                  <Plus size={15} /> {t("questions.addQuestion")}
+                </Button>
+              ) : undefined
             }
           />
         </Card>
@@ -209,6 +217,7 @@ export default function ExamDetailPage() {
             <QuestionCard
               key={q.id}
               question={q}
+              canManage={canManage}
               onEdit={() => openEditQuestion(q)}
               onDelete={() => deleteQuestionMut.mutate(q.id)}
               onOpenRubric={() => openRubric(q)}
@@ -290,11 +299,14 @@ export default function ExamDetailPage() {
 
 function QuestionCard({
   question,
+  canManage,
   onEdit,
   onDelete,
   onOpenRubric,
 }: {
   question: QuestionDto;
+  /** Teacher-only controls (edit/delete/rubric/file uploads) render when true. */
+  canManage: boolean;
   onEdit: () => void;
   onDelete: () => void;
   onOpenRubric: () => void;
@@ -377,7 +389,8 @@ function QuestionCard({
 
       <p className="mb-3 line-clamp-3 text-sm text-zinc-600">{question.text}</p>
 
-      {/* Role-labeled attachments: clearly distinguish Question vs Rubric */}
+      {/* Role-labeled attachments: clearly distinguish Question vs Rubric.
+          Upload/replace/delete are Teacher-only; non-teachers get read-only links. */}
       <div className="mb-3 grid gap-2 sm:grid-cols-2">
         <FileAttachment
           label={t("files.questionLabel")}
@@ -386,6 +399,7 @@ function QuestionCard({
           fileUrl={question.fileName ? questionFileUrl(question.id) : null}
           onUpload={handleQuestionFile}
           onDelete={handleDeleteQuestionFile}
+          canEdit={canManage}
         />
         <FileAttachment
           label={t("files.rubricLabel")}
@@ -394,6 +408,7 @@ function QuestionCard({
           fileUrl={rubricQ.data?.fileName ? rubricFileUrl(question.id) : null}
           onUpload={handleRubricFile}
           onDelete={handleDeleteRubricFile}
+          canEdit={canManage}
         />
       </div>
 
@@ -409,31 +424,39 @@ function QuestionCard({
       ) : null}
 
       <div className="flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-3">
-        <Button size="sm" variant="secondary" onClick={onOpenRubric}>
-          {t("rubric.editRubric")}
-        </Button>
-        <label
-          className={clsx(
-            "inline-flex cursor-pointer items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-medium transition",
-            uploading
-              ? "cursor-wait border-zinc-200 bg-zinc-50 text-zinc-400"
-              : "border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200"
-          )}
-        >
-          <Upload size={13} />
-          {uploading ? t("answers.uploading") : t("answers.uploadAnswer")}
-          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.docx,.xlsx,.xls" className="hidden" onChange={handleUpload} disabled={uploading} />
-        </label>
+        {canManage ? (
+          <Button size="sm" variant="secondary" onClick={onOpenRubric}>
+            {t("rubric.editRubric")}
+          </Button>
+        ) : null}
+        {canManage ? (
+          <label
+            className={clsx(
+              "inline-flex cursor-pointer items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-medium transition",
+              uploading
+                ? "cursor-wait border-zinc-200 bg-zinc-50 text-zinc-400"
+                : "border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200"
+            )}
+          >
+            <Upload size={13} />
+            {uploading ? t("answers.uploading") : t("answers.uploadAnswer")}
+            <input type="file" accept=".pdf,.png,.jpg,.jpeg,.docx,.xlsx,.xls" className="hidden" onChange={handleUpload} disabled={uploading} />
+          </label>
+        ) : null}
         <Link to={`/grading/queue?questionId=${question.id}`} className="text-xs font-medium text-primary-600 hover:underline">
           {t("queue.openQueue")} ({formatNumber(answersQ.data?.length ?? 0, lang)})
         </Link>
         <span className="flex-1" />
-        <Button size="sm" variant="ghost" onClick={onEdit} aria-label={t("common.edit")}>
-          <Edit2 size={13} />
-        </Button>
-        <Button size="sm" variant="ghost" className="text-red-600 hover:bg-red-50" onClick={onDelete}>
-          <Trash2 size={13} />
-        </Button>
+        {canManage ? (
+          <>
+            <Button size="sm" variant="ghost" onClick={onEdit} aria-label={t("common.edit")}>
+              <Edit2 size={13} />
+            </Button>
+            <Button size="sm" variant="ghost" className="text-red-600 hover:bg-red-50" onClick={onDelete} aria-label={t("common.delete")}>
+              <Trash2 size={13} />
+            </Button>
+          </>
+        ) : null}
       </div>
     </Card>
   );

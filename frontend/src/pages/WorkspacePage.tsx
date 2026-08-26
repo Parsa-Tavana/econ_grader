@@ -25,7 +25,6 @@ import {
   overrideRun,
 } from "../api/grading";
 import type { TeacherReviewDto } from "../types/models";
-import { getUserId, isValidGuid, setUserId } from "../api/client";
 import type { GradingRun } from "../types/models";
 import { parseCriteriaScores } from "../types/models";
 import {
@@ -46,6 +45,8 @@ import { AnswerStatusBadge } from "../components/common";
 import { formatCost, formatLatency, formatNumber, formatScore, formatDateTime, timeAgo } from "../utils/format";
 import { currentLang } from "../hooks/useLang";
 import { useToast } from "../hooks/useToast";
+import { getAuthUser } from "../api/auth";
+import { hasRole } from "../utils/roles";
 
 export default function WorkspacePage() {
   const { answerId = "" } = useParams();
@@ -54,6 +55,10 @@ export default function WorkspacePage() {
   const qc = useQueryClient();
   const toast = useToast();
   const navigate = useNavigate();
+
+  // POST /grading/run is Teacher-only; accept/override reviews are Teacher+Corrector.
+  const canRunGrading = hasRole(getAuthUser(), "Teacher");
+  const canReview = hasRole(getAuthUser(), "Teacher", "Corrector");
 
   const answerQ = useQuery({ queryKey: ["answer", answerId], queryFn: () => getAnswer(answerId) });
   const questionQ = useQuery({
@@ -99,9 +104,6 @@ export default function WorkspacePage() {
   const [reviewMode, setReviewMode] = useState<"accept" | "override" | null>(null);
   const [overrideScore, setOverrideScore] = useState<number>(0);
   const [note, setNote] = useState("");
-  // identity captured inside the review dialog when no valid GUID is configured
-  const [identityInput, setIdentityInput] = useState(getUserId() ?? "");
-  const [identityError, setIdentityError] = useState<string | null>(null);
 
   const latestValid = useMemo(
     () =>
@@ -170,23 +172,14 @@ export default function WorkspacePage() {
     },
   });
 
+  /** Reviewer identity is derived server-side from the JWT — no input needed. */
   function openReview(mode: "accept" | "override") {
     if (!latestValid) return;
-    setIdentityInput(getUserId() ?? "");
-    setIdentityError(isValidGuid(getUserId()) ? null : t("settings.userIdInvalid"));
     setReviewMode(mode);
   }
 
-  /** Blocks submit until a valid GUID identity is present (backend requires X-User-Id). */
   function handleReviewSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const value = identityInput.trim();
-    if (!isValidGuid(value)) {
-      setIdentityError(t("settings.userIdInvalid"));
-      return;
-    }
-    setIdentityError(null);
-    setUserId(value);
     reviewMut.mutate();
   }
 
@@ -197,7 +190,6 @@ export default function WorkspacePage() {
   const answer = answerQ.data!;
   const question = questionQ.data;
   const criteriaScores = latestValid ? parseCriteriaScores(latestValid.criteriaScoresJson) : [];
-  const identityReady = isValidGuid(identityInput.trim());
 
   return (
     <>
@@ -377,12 +369,16 @@ export default function WorkspacePage() {
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-100 pt-4">
-                  <Button onClick={() => openReview("accept")}>
-                    <Check size={15} /> {t("workspace.accept")}
-                  </Button>
-                  <Button variant="secondary" onClick={() => openReview("override")}>
-                    <Pencil size={14} /> {t("workspace.override")}
-                  </Button>
+                  {canReview ? (
+                    <>
+                      <Button onClick={() => openReview("accept")}>
+                        <Check size={15} /> {t("workspace.accept")}
+                      </Button>
+                      <Button variant="secondary" onClick={() => openReview("override")}>
+                        <Pencil size={14} /> {t("workspace.override")}
+                      </Button>
+                    </>
+                  ) : null}
                   <span className="flex-1" />
                   <span className="self-center text-[11px] text-zinc-400">
                     {latestValid.modelName} · T=
@@ -394,7 +390,8 @@ export default function WorkspacePage() {
             )}
           </Card>
 
-          {/* Run AI grading controls */}
+          {/* Run AI grading controls (Teacher-only — mirrors [Authorize(Roles=Teacher)] on POST /grading/run) */}
+          {canRunGrading ? (
           <Card>
             <CardHeader
               title={t("gradingDialog.title")}
@@ -442,6 +439,7 @@ export default function WorkspacePage() {
               </p>
             ) : null}
           </Card>
+          ) : null}
 
           {/* Run history timeline */}
           <Card>
@@ -529,31 +527,6 @@ export default function WorkspacePage() {
       >
         {reviewMode ? (
           <form onSubmit={handleReviewSubmit}>
-            {/* Identity guard — backend rejects reviews without a valid GUID header */}
-            {!identityReady || identityError ? (
-              <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
-                <Field label={`${t("settings.userId")} (${t("common.required")})`} htmlFor="rv-uid">
-                  <Input
-                    id="rv-uid"
-                    value={identityInput}
-                    onChange={(e) => {
-                      setIdentityInput(e.target.value);
-                      setIdentityError(null);
-                    }}
-                    placeholder="00000000-0000-0000-0000-000000000000"
-                    autoComplete="off"
-                    dir="ltr"
-                    required
-                  />
-                </Field>
-                {identityError ? (
-                  <p className="mt-1.5 text-xs text-red-600" role="alert">
-                    {identityError}
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-
             {reviewMode === "override" ? (
               <Field label={t("students.teacherScore")} required htmlFor="ov-score">
                 <Input

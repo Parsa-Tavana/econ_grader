@@ -71,3 +71,9 @@ Desktop.ini
 
 # ===== Docker runtime leftovers =====
 docker-compose.override.yml
+
+# Backup output from scripts/backup.sh / backup.ps1 (contains exam data)
+/backups/
+
+# Local dev overrides contain real dev credentials (same policy as .env)
+src/EconGrader.Web/appsettings.Development.json

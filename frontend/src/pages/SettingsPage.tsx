@@ -2,18 +2,14 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { clsx } from "clsx";
 import { healthCheck } from "../api/system";
-import { setUserId, getUserId, isValidGuid } from "../api/client";
+import { getAuthUser } from "../api/auth";
 import { changeLanguage, type AppLang } from "../i18n";
-import { PageHeader, Card, CardHeader, Badge, Input, Field, Button } from "../components/ui";
+import { PageHeader, Card, CardHeader, Badge, Button } from "../components/ui";
 
 export default function SettingsPage() {
   const { t, i18n } = useTranslation();
   const current = (i18n.language?.startsWith("fa") ? "fa" : "en") as AppLang;
-
-  // identity
-  const [uid, setUid] = useState(getUserId() ?? "");
-  const [savedFlash, setSavedFlash] = useState(false);
-  const [uidError, setUidError] = useState<string | null>(null);
+  const user = getAuthUser();
 
   // health
   const [healthState, setHealthState] = useState<"loading" | "up" | "down">("loading");
@@ -63,48 +59,29 @@ export default function SettingsPage() {
           </p>
         </Card>
 
-        {/* Identity */}
+        {/* Profile (read-only — identity comes from the JWT session) */}
         <Card>
-          <CardHeader title={t("settings.identity")} subtitle={t("settings.userIdHint")} />
-          <Field label={t("settings.userId")} htmlFor="uid">
-            <Input
-              id="uid"
-              value={uid}
-              onChange={(e) => setUid(e.target.value)}
-              placeholder="00000000-0000-0000-0000-000000000000"
-            />
-          </Field>
-          <div className="mt-3 flex items-center gap-2">
-            <Button
-              size="sm"
-              onClick={() => {
-                const value = uid.trim();
-                if (value && !isValidGuid(value)) {
-                  setUidError(t("settings.userIdInvalid"));
-                  return;
-                }
-                setUidError(null);
-                setUserId(value || null);
-                setSavedFlash(true);
-                window.setTimeout(() => setSavedFlash(false), 2000);
-              }}
-            >
-              {t("common.save")}
-            </Button>
-            {savedFlash ? <Badge tone="green">{t("states.reviewSaved")}</Badge> : null}
-            {getUserId() ? (
-              <Badge tone="zinc">
-                <span className="ltr-token">{getUserId()!.slice(0, 8)}…</span>
-              </Badge>
-            ) : null}
-          </div>
-          {uidError ? (
-            <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-600" role="alert">
-              {uidError}
-            </p>
+          <CardHeader title={t("settings.profile")} subtitle={t("settings.profileHint")} />
+          {user ? (
+            <dl className="space-y-3 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-xs text-zinc-500">{t("settings.profileName")}</dt>
+                <dd className="font-medium text-zinc-900">{user.displayName || "—"}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-xs text-zinc-500">{t("auth.email")}</dt>
+                <dd className="ltr-token font-medium text-zinc-900">{user.email}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-xs text-zinc-500">{t("user.role")}</dt>
+                <dd>
+                  <Badge tone="blue">{t(`user.role${user.role}` as const)}</Badge>
+                </dd>
+              </div>
+            </dl>
           ) : (
-            <p className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-700">
-              {t("settings.userIdRequiredForReview")}
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              {t("settings.profileSignedOut")}
             </p>
           )}
         </Card>
