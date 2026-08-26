@@ -24,6 +24,13 @@ are restoring. All commands run from the repo root.
   the app login again with step 5.
 - Docker compose stack stopped or running-fresh; the steps below assume the
   stack from `docker compose up -d db` only.
+- ⚠️ Steps as written restore IN PLACE over `econgrader-db`. To rehearse or
+  restore without touching production, run everything against an isolated
+  container instead (`docker run -d --name econgrader-db-drill …`, its own
+  network/volume, api on a spare port) and delete it afterwards — that is how
+  this procedure was validated. Note: a bare `docker run` mssql container has
+  NO healthcheck, so poll readiness with sqlcmd (`SELECT 1`) rather than
+  `docker inspect .State.Health`.
 
 ## 1. Start an empty SQL Server container
 
@@ -64,14 +71,25 @@ empty database — stop and investigate before continuing.
 ## 4. Restore the answer-images volume
 
 ```bash
-# find the actual volume name (usually econgrader_app_storage):
-docker volume ls --format "{{.Name}}" | grep _app_storage
+# Find the app_storage volume — pick the one the RUNNING api container uses
+# (there may be stale leftovers from old project names; verify, don't guess):
+docker inspect econgrader-api --format '{{range .Mounts}}{{if eq .Destination "/srv/storage"}}{{.Name}}{{end}}{{end}}'
+# → e.g. econ_grader_app_storage
 
-docker run --rm -v econgrader_app_storage:/storage -v "$(pwd)/backups/<timestamp>:/backup:ro" alpine \
+VOL=$(docker inspect econgrader-api --format '{{range .Mounts}}{{if eq .Destination "/srv/storage"}}{{.Name}}{{end}}{{end}}')
+MSYS_NO_PATHCONV=1 docker run --rm -v "$VOL":/storage -v "$(pwd -W)/backups/<timestamp>:/backup:ro" alpine \
   sh -c "rm -rf /storage/* && tar xzf /backup/app-storage-<timestamp>.tar.gz -C /storage"
 ```
 
-## 5. Recreate the least-privilege app login
+Notes:
+- `$(pwd -W)` gives a Windows-style path that Docker Desktop can bind-mount;
+  plain Git-Bash `$(pwd)` (`/c/...`) fails silently with an empty /backup.
+  On native Linux, use `$(pwd)`.
+- If the api container isn't running, list candidates with
+  `docker volume ls --format "{{.Name}}" | grep _app_storage` and confirm the
+  right one holds existing answer images before overwriting anything.
+
+## 5. Recreate the least-privilege app login AND re-link it
 
 The login lives in `master` (server scope) and is NOT inside the database
 backup — recreate it. sqlcmd cannot read a script from stdin, so mount the
@@ -88,6 +106,27 @@ MSYS_NO_PATHCONV=1 docker exec econgrader-db rm -f /tmp/init-db.sql
 ```
 
 Expected output ends with: `Done — econgrader_app is db_owner of EconGrader only.`
+
+**Then re-link the restored user to the new login (do not skip).** A freshly
+created login gets a NEW SID; the restored database still references the OLD
+one, so every app request fails with "Cannot open database … The login failed"
+even though the login and password look correct (this is SQL Server's
+"orphaned user" problem — verified during a restore drill on 2026-08-26):
+
+```bash
+MSYS_NO_PATHCONV=1 docker exec econgrader-db /opt/mssql-tools18/bin/sqlcmd \
+  -C -S localhost -U sa -P "$SA_PASSWORD" -d EconGrader \
+  -Q "ALTER USER [econgrader_app] WITH LOGIN = [econgrader_app];"
+```
+
+Quick self-check that the link worked:
+
+```bash
+MSYS_NO_PATHCONV=1 docker exec econgrader-db /opt/mssql-tools18/bin/sqlcmd \
+  -C -S localhost -U econgrader_app -P "$DB_APP_PASSWORD" -d EconGrader \
+  -Q "SELECT COUNT(*) FROM Users;"
+# expect a count, NOT "Cannot open database … requested by the login"
+```
 
 ## 6. Bring up the rest of the stack and verify end-to-end
 
