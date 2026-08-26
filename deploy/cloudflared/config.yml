@@ -1,0 +1,42 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Cloudflare Named Tunnel — EconGrader (Windows host, Option A in DEPLOY.md)
+#
+# Setup: copy to %LOCALAPPDATA%\Cloudflare\cloudflared\config.yml (or the path
+# you pass with --config) and replace EVERY <ANGLE-BRACKET> placeholder:
+#   <TUNNEL-ID>       printed by `cloudflared tunnel create econgrader`
+#   grader.example.dev your real hostname on a zone hosted in Cloudflare DNS
+#   <CREDENTIALS-JSON> full path of ~/.cloudflared/<TUNNEL-ID>.json created by
+#                      `tunnel create` — see deploy/cloudflared/SETUP.md §3
+#
+# The tunnel connects OUT to Cloudflare's edge; nothing is opened inbound and
+# TLS terminates at Cloudflare (a valid certificate is automatic for zones in
+# your account). The origin here is plain HTTP on loopback.
+# ═══════════════════════════════════════════════════════════════════════════
+
+tunnel: <TUNNEL-ID>
+credentials-file: C:\Users\<YOU>\.cloudflared\<TUNNEL-ID>.json
+# Keep cloudflared from self-updating under the Windows service account;
+# update it manually (winget upgrade Cloudflare.cloudflared).
+no-autoupdate: true
+
+ingress:
+  # Public production hostname → loopback-published .NET API (:8080), which
+  # also serves nothing else; the SPA is reached via the same API host only if
+  # you run the frontend stack. With compose (Option A default) BOTH app and
+  # API are published by caddy on :80 — point this at caddy instead:
+  #   - service: http://localhost:80
+  # The template below targets the API directly because that works for BOTH
+  # layouts (compose-with-caddy: use http://localhost:80 instead).
+  - hostname: grader.example.dev
+    service: http://localhost:8080
+
+  # OPTIONAL: second hostname reachable only from your LAN (e.g. while the
+  # public name is gated behind Cloudflare Access). Point it at the SAME
+  # origin; restrict who can reach it with Cloudflare Access policies or by
+  # simply not creating a public DNS record for it.
+  - hostname: lan-grader.example.dev
+    service: http://localhost:8080
+
+  # REQUIRED catch-all — everything else gets a 404 from cloudflared itself,
+  # so typos never leak into your origin.
+  - service: http_status:404

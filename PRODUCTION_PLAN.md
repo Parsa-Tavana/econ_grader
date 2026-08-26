@@ -1,6 +1,8 @@
 # EconGrader — Production Readiness Plan
 
-**Date:** 2026-08-26 · **Branch:** `Frontend/Parsa` · **Rev 2.1** — updated after pulling commits `2614514` (frontend JWT login) and `e481374` (9router gateway), plus Claude Code's post-login gap review. Rev 1 findings that are now obsolete are marked ✅ DONE.
+**Date:** 2026-08-26 · **Branch:** `Frontend/Parsa` · **Rev 2.2**
+
+> **PROGRESS (verified 2026-08-26):** Prompts 1, 2A and 2B are **DONE and independently verified** (commits `2614514`, `7e4ca3c`, `875d883` + 2A commit): legacy X-User-Id purged, UsersPage + bootstrap UI live, token expiry enforced, role-filtered navs, secrets out of tracked files, fail-fast JWT guard, internal service auth wired, least-privilege DB user via db-init, restart policies + log rotation, first backups taken (`backups/2026-08-26-*`). **Remaining: Prompt 3 (deploy scaffolding)** + two manual drills below.
 
 ---
 

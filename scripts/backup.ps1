@@ -1,4 +1,4 @@
-# ═══════════════════════════════════════════════════════════════════════════
+﻿# ═══════════════════════════════════════════════════════════════════════════
 # EconGrader backup: SQL Server .bak + app_storage archive → .\backups\<ts>\
 #
 # Usage (from repo root):  .\scripts\backup.ps1 [-KeepN 14]

@@ -134,8 +134,18 @@ try
             client.BaseAddress = new Uri(gradingServiceBaseUrl);
             client.Timeout = TimeSpan.FromSeconds(120);
         })
-        // Retry once on timeout — grading models can be slow under load.
-        .AddStandardResilienceHandler(); // requires Microsoft.Extensions.Http.Resilience (built into .NET 8+)
+        // Grading models routinely take 30-90s per request — far beyond the
+        // standard handler's 10s attempt timeout. Configure the standard
+        // pipeline's timeouts instead of its defaults.
+        .AddStandardResilienceHandler(o =>
+        {
+            o.Retry.ShouldHandle = args => ValueTask.FromResult(false); // no retries: runs are already re-drivable from the UI
+            o.AttemptTimeout.Timeout = TimeSpan.FromSeconds(110);
+            o.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(115);
+            // Validation rule: sampling duration must be >= 2× attempt timeout,
+            // otherwise startup fails (OptionsValidationException).
+            o.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(230);
+        });
     // Also register a named client used by HealthController
     builder.Services.AddHttpClient("grading");
 
