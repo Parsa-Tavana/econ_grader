@@ -19,7 +19,30 @@ from ..config import settings
 logger = logging.getLogger(__name__)
 
 
+def _langfuse_client():
+    """Shared Langfuse SDK client, or None when tracing is not configured.
+
+    Opt-in via LANGFUSE_PUBLIC_KEY/SECRET_KEY; every failure to initialize or
+    ingest is swallowed — observability must never break grading.
+    """
+    if not (settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY):
+        return None
+    try:
+        from langfuse import Langfuse
+        return Langfuse(
+            public_key=settings.LANGFUSE_PUBLIC_KEY,
+            secret_key=settings.LANGFUSE_SECRET_KEY,
+            host=settings.LANGFUSE_HOST,
+        )
+    except Exception:
+        logger.exception("Langfuse init failed — continuing without LLM tracing")
+        return None
+
+
 class ClaudeVisionGrader(IVisionGrader):
+    # One client per process; the SDK batches and flushes on its own.
+    _lf = _langfuse_client()
+
     def __init__(self) -> None:
         if not settings.ANTHROPIC_API_KEY:
             raise ValueError("ANTHROPIC_API_KEY is not set — cannot instantiate ClaudeVisionGrader")
@@ -73,8 +96,16 @@ class ClaudeVisionGrader(IVisionGrader):
             )
             raw_text = "".join(b.text for b in resp.content if b.type == "text")
             latency_ms = int((time.time() - start_ms) * 1000)
-            
+
             parsed = self._parse_response(raw_text)
+            self._trace_generation(
+                model_name=model_name, prompt_version=prompt_version,
+                question_text=question_text, prompt_text=prompt_text,
+                raw_text=raw_text, parsed=parsed,
+                input_tokens=resp.usage.input_tokens,
+                output_tokens=resp.usage.output_tokens,
+                latency_ms=latency_ms,
+            )
             return GradingResult(
                 provider="claude",
                 model_name=model_name,
@@ -118,6 +149,40 @@ class ClaudeVisionGrader(IVisionGrader):
                 reasoning="", raw_response="", latency_ms=int((time.time() - start_ms) * 1000),
                 error=f"Claude API failure: {exc}",
             )
+
+    def _trace_generation(
+        self, *, model_name: str, prompt_version: str,
+        question_text: str, prompt_text: str, raw_text: str,
+        parsed: dict[str, Any], input_tokens: int, output_tokens: int,
+        latency_ms: int,
+    ) -> None:
+        """Best-effort Langfuse trace of one successful grading call."""
+        if self._lf is None:
+            return
+        try:
+            trace = self._lf.trace(
+                name="grade-answer",
+                metadata={"prompt_version": prompt_version},
+            )
+            trace.generation(
+                name=f"claude/{model_name}",
+                model=model_name,
+                input=[
+                    {"role": "user",
+                     "content": question_text or "(image-only answer)"},
+                ],
+                output=raw_text,
+                usage={"input": input_tokens, "output": output_tokens},
+                # Cost is derived from the model price table in the UI.
+                metadata={
+                    "latency_ms": latency_ms,
+                    "ai_score": parsed.get("score"),
+                    "criteria_count": len(parsed.get("criteria_scores", [])),
+                    "prompt_preview": prompt_text[:500],
+                },
+            )
+        except Exception:
+            logger.exception("Langfuse trace failed — grading unaffected")
 
     @staticmethod
     def _parse_response(raw_text: str) -> dict[str, Any]:

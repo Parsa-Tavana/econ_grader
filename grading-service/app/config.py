@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
 
+    # Langfuse LLM tracing (optional). When LANGFUSE_PUBLIC_KEY/SECRET_KEY are
+    # set, every Claude call is traced to a self-hosted Langfuse instance —
+    # prompt, response, tokens, latency, cost. Empty keys = fully disabled.
+    LANGFUSE_PUBLIC_KEY: Optional[str] = None
+    LANGFUSE_SECRET_KEY: Optional[str] = None
+    LANGFUSE_HOST: str = "http://langfuse:3000"
+
     # Internal service auth: the .NET API sends X-Internal-Key on every call.
     # Empty key + ENVIRONMENT=production → protected endpoints reject ALL
     # requests (fail-closed). In non-production (local bare-metal dev) an empty

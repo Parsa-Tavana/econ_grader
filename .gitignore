@@ -71,6 +71,8 @@ Desktop.ini
 
 # ===== Docker runtime leftovers =====
 docker-compose.override.yml
+# local-only GUI/observability stack (SSMS port, Dozzle, Filebrowser, Langfuse)
+docker-compose.observability.yml
 
 # Backup output from scripts/backup.sh / backup.ps1 (contains exam data)
 /backups/
