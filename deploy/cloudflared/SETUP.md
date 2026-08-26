@@ -80,12 +80,15 @@ Copy-Item ".\deploy\cloudflared\config.yml" (Join-Path $confDir "config.yml")
 notepad (Join-Path $confDir "config.yml")   # replace <TUNNEL-ID> + hostnames
 ```
 
-Point the ingress `service:` at whatever publishes the app on loopback:
+The template ships pointing at caddy (`http://localhost:80`) — the default
+topology this repo deploys, where the full compose stack serves both SPA and
+API through one origin. If you run a different layout, point the ingress
+`service:` at whatever publishes it on loopback:
 
 | You run… | ingress service |
 |---|---|
-| Full compose stack (caddy on :80) | `http://localhost:80` |
-| API alone (2A loopback publish) | `http://localhost:8080` |
+| Full compose stack (caddy on :80) — **default** | `http://localhost:80` (as shipped) |
+| API alone (loopback publish on :8080; no SPA) | `http://localhost:8080` |
 | Dev Vite (:5173) | `http://localhost:5173` |
 
 ## 4. Route DNS

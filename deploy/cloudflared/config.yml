@@ -20,22 +20,20 @@ credentials-file: C:\Users\<YOU>\.cloudflared\<TUNNEL-ID>.json
 no-autoupdate: true
 
 ingress:
-  # Public production hostname → loopback-published .NET API (:8080), which
-  # also serves nothing else; the SPA is reached via the same API host only if
-  # you run the frontend stack. With compose (Option A default) BOTH app and
-  # API are published by caddy on :80 — point this at caddy instead:
-  #   - service: http://localhost:80
-  # The template below targets the API directly because that works for BOTH
-  # layouts (compose-with-caddy: use http://localhost:80 instead).
+  # Default topology (this repo's compose): caddy is the single public entry —
+  # it routes /api/* to the .NET API and everything else to the nginx SPA on
+  # port 80. Pointing the tunnel at caddy means BOTH app and API are served.
+  # Alternative (api container alone, no caddy/frontend running):
+  #   service: http://localhost:8080   ← the loopback-published .NET API only
   - hostname: grader.example.dev
-    service: http://localhost:8080
+    service: http://localhost:80
 
   # OPTIONAL: second hostname reachable only from your LAN (e.g. while the
   # public name is gated behind Cloudflare Access). Point it at the SAME
   # origin; restrict who can reach it with Cloudflare Access policies or by
   # simply not creating a public DNS record for it.
   - hostname: lan-grader.example.dev
-    service: http://localhost:8080
+    service: http://localhost:80
 
   # REQUIRED catch-all — everything else gets a 404 from cloudflared itself,
   # so typos never leak into your origin.
