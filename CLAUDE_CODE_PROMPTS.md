@@ -187,7 +187,7 @@ CONTEXT
 Same repo. Everything currently runs in Docker on one machine. Audit findings (all
 verified against code):
 SECRETS
-- SA_PASSWORD "YourStrong@Passw0rd" hardcoded in docker-compose.yml AND inside the
+- SA_PASSWORD "<dev-default-redacted>" hardcoded in docker-compose.yml AND inside the
   db healthcheck command AND in src/EconGrader.Web/appsettings.json. In git history.
 - appsettings.json ships a committed DEV JWT signing key as fallback. Program.cs
   throws when Jwt:SigningKey is missing — but the file always supplies the weak
@@ -257,7 +257,7 @@ CONSTRAINTS
 
 ACCEPTANCE GATES (blocking)
 - dotnet build → 0 errors 0 warnings; pytest -q → 15 passed; npm gates untouched.
-- grep for "YourStrong@Passw0rd" across repo → ZERO hits outside git history.
+- grep for "<dev-default-redacted>" across repo → ZERO hits outside git history.
 - Program.cs startup in Production with dev-default Jwt:SigningKey → refuses to boot
   with clear error (test via ASPNETCORE_ENVIRONMENT=Production dotnet run attempt).
 - python -c test or curl: /grade without X-Internal-Key → 401 in prod-mode; with
