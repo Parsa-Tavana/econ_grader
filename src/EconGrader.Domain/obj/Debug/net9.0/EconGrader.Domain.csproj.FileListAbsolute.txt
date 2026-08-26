@@ -1,0 +1,12 @@
+C:\Users\SHPA-N6\Desktop\econ_grader\src\EconGrader.Domain\bin\Debug\net9.0\EconGrader.Domain.deps.json
+C:\Users\SHPA-N6\Desktop\econ_grader\src\EconGrader.Domain\bin\Debug\net9.0\EconGrader.Domain.dll
+C:\Users\SHPA-N6\Desktop\econ_grader\src\EconGrader.Domain\bin\Debug\net9.0\EconGrader.Domain.pdb
+C:\Users\SHPA-N6\Desktop\econ_grader\src\EconGrader.Domain\obj\Debug\net9.0\EconGrader.Domain.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\SHPA-N6\Desktop\econ_grader\src\EconGrader.Domain\obj\Debug\net9.0\EconGrader.Domain.AssemblyInfoInputs.cache
+C:\Users\SHPA-N6\Desktop\econ_grader\src\EconGrader.Domain\obj\Debug\net9.0\EconGrader.Domain.AssemblyInfo.cs
+C:\Users\SHPA-N6\Desktop\econ_grader\src\EconGrader.Domain\obj\Debug\net9.0\EconGrader.Domain.csproj.CoreCompileInputs.cache
+C:\Users\SHPA-N6\Desktop\econ_grader\src\EconGrader.Domain\obj\Debug\net9.0\EconGrader.Domain.sourcelink.json
+C:\Users\SHPA-N6\Desktop\econ_grader\src\EconGrader.Domain\obj\Debug\net9.0\EconGrader.Domain.dll
+C:\Users\SHPA-N6\Desktop\econ_grader\src\EconGrader.Domain\obj\Debug\net9.0\refint\EconGrader.Domain.dll
+C:\Users\SHPA-N6\Desktop\econ_grader\src\EconGrader.Domain\obj\Debug\net9.0\EconGrader.Domain.pdb
+C:\Users\SHPA-N6\Desktop\econ_grader\src\EconGrader.Domain\obj\Debug\net9.0\ref\EconGrader.Domain.dll

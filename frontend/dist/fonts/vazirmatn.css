@@ -1,0 +1,25 @@
+/* Vazirmatn — self-hosted (SIL OFL 1.1, © Saber Rastikerdar) */
+/* Only the weights the UI uses are bundled; browser synthesizes the rest. */
+@font-face {
+  font-family: Vazirmatn;
+  src: url("./Vazirmatn-Regular.woff2") format("woff2");
+  font-weight: 100 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: Vazirmatn;
+  src: url("./Vazirmatn-Medium.woff2") format("woff2");
+  font-weight: 500 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: Vazirmatn;
+  src: url("./Vazirmatn-Bold.woff2") format("woff2");
+  font-weight: 600 900;
+  font-style: normal;
+  font-display: swap;
+}

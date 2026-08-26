@@ -1,0 +1,28 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# LOCAL DEVELOPMENT OVERRIDE — 9router gateway
+#
+# This file is git-ignored (see .gitignore). It is picked up automatically by
+# `docker compose up` alongside docker-compose.yml and overrides matching keys.
+#
+# WHAT IT DOES: routes the grading service's Anthropic calls through the
+# 9router desktop-app proxy running on the HOST at port 20128 instead of
+# calling api.anthropic.com directly.
+#
+#   - host.docker.internal, NOT localhost: the grading service runs INSIDE
+#     Docker; localhost there would point at the container itself.
+#   - /v1 suffix required — the gateway exposes an OpenAI/Anthropic-compatible
+#     REST surface under /v1.
+#   - CLAUDE_MODEL=claude-econ selects the model alias configured in 9router;
+#     it must match a model the gateway actually proxies.
+#
+# WHEN TO USE: only when developing against a locally-proxied Claude endpoint
+# (shared quota, request logging). For normal runs DELETE this file or rename
+# it — the base compose already points at the real Anthropic API with
+# MODEL_NAME=claude-sonnet-4-5.
+# ─────────────────────────────────────────────────────────────────────────────
+services:
+  grading:
+    environment:
+      - ANTHROPIC_BASE_URL=http://host.docker.internal:20128/v1
+      - CLAUDE_MODEL=claude-econ-grader
+      - MODEL_NAME=claude-econ-grader

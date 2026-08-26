@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-26 · **Branch:** `Frontend/Parsa` · **Rev 2.2**
 
-> **PROGRESS (verified 2026-08-26):** Prompts 1, 2A and 2B are **DONE and independently verified** (commits `2614514`, `7e4ca3c`, `875d883` + 2A commit): legacy X-User-Id purged, UsersPage + bootstrap UI live, token expiry enforced, role-filtered navs, secrets out of tracked files, fail-fast JWT guard, internal service auth wired, least-privilege DB user via db-init, restart policies + log rotation, first backups taken (`backups/2026-08-26-*`). **Remaining: Prompt 3 (deploy scaffolding)** + two manual drills below.
+> **PROGRESS (verified 2026-08-26): ALL FOUR PROMPTS DONE & INDEPENDENTLY VERIFIED** (`2614514` auth, `7e4ca3c`+`875d883` infra, `3330678` deploy scaffolding, `19f9655` tunnel-default fix). Code-complete for publish. **What remains is manual, on the user:** ① restore drill from `scripts/restore.md`; ② blind-grading DevTools check; ③ follow `deploy/cloudflared/SETUP.md` to create the named tunnel + DNS at the reseller; ④ go-live order per root `DEPLOY.md`.
 
 ---
 
