@@ -42,6 +42,7 @@ import {
   friendlyError,
 } from "../components/ui";
 import { AnswerStatusBadge } from "../components/common";
+import { AuthFileView } from "../components/AuthFileView";
 import { formatCost, formatLatency, formatNumber, formatScore, formatDateTime, timeAgo } from "../utils/format";
 import { currentLang } from "../hooks/useLang";
 import { useToast } from "../hooks/useToast";
@@ -215,14 +216,8 @@ export default function WorkspacePage() {
             ) : null}
           </div>
           <div className="overflow-hidden rounded-xl bg-zinc-100">
-            {answer.contentType === "application/pdf" ? (
-              <iframe
-                src={getAnswerImageUrl(answer.id)}
-                title={`${t("viewer.answerScan")} — ${answer.studentExternalId}`}
-                className="h-[560px] w-full"
-              />
-            ) : answer.contentType ===
-              "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ? (
+            {answer.contentType ===
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ? (
               <div className="flex h-40 flex-col items-center justify-center gap-2 text-sm text-zinc-500">
                 <FileText size={22} className="text-red-400" />
                 <span>{answer.fileName ?? t("viewer.answerScan")}</span>
@@ -233,11 +228,16 @@ export default function WorkspacePage() {
                 </a>
               </div>
             ) : (
-              <img
-                src={getAnswerImageUrl(answer.id)}
+              /* Authenticated blob fetch — bare img/iframe URLs get 401 (no JWT header). */
+              <AuthFileView
+                path={`/answers/${answer.id}/image`}
+                contentType={answer.contentType ?? null}
                 alt={`${t("viewer.answerScan")} — ${answer.studentExternalId}`}
-                className="max-h-[560px] w-full object-contain"
-                loading="lazy"
+                className={
+                  answer.contentType === "application/pdf"
+                    ? "h-[560px] w-full"
+                    : "max-h-[560px] w-full object-contain"
+                }
               />
             )}
           </div>

@@ -73,7 +73,8 @@ services:
       - QWEN_BASE_URL=http://localhost:8000/v1
       - QWEN_API_KEY=not-needed
       - DEFAULT_TEMPERATURE=0.0
-      - DEFAULT_MAX_TOKENS=2048
+      # Headroom for thinking-style models (see root docker-compose.yml note).
+      - DEFAULT_MAX_TOKENS=8192
       - IMAGE_STORAGE_ROOT=/srv/storage/images
       - PROMPTS_DIR=/srv/app/prompts
       - LOG_LEVEL=INFO

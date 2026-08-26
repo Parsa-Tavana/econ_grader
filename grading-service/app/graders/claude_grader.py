@@ -95,6 +95,14 @@ class ClaudeVisionGrader(IVisionGrader):
                 messages=[{"role": "user", "content": content}],
             )
             raw_text = "".join(b.text for b in resp.content if b.type == "text")
+            if not raw_text.strip() and getattr(resp, "stop_reason", None) == "max_tokens":
+                # All tokens were consumed by thinking (or other non-text blocks)
+                # before any JSON was emitted — a clearer error than a bare
+                # JSONDecodeError, and actionable: raise DEFAULT_MAX_TOKENS.
+                raise RuntimeError(
+                    "Model produced no text (stop_reason=max_tokens) — "
+                    "output budget exhausted by reasoning; increase DEFAULT_MAX_TOKENS"
+                )
             latency_ms = int((time.time() - start_ms) * 1000)
 
             parsed = self._parse_response(raw_text)

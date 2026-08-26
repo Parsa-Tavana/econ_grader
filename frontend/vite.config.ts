@@ -22,7 +22,9 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    // PORT env var wins when a harness/launcher assigns a free port;
+    // plain `npm run dev` still defaults to 5173.
+    port: Number(process.env.PORT) || 5173,
     // Allow access from other machines / tunnels (share-demo.ps1 uses cloudflared).
     host: true, // listen on 0.0.0.0, not just localhost
     allowedHosts: true, // accept any Host header (trycloudflare.com etc.)
