@@ -8,7 +8,11 @@ from typing import Any
 
 from google import genai
 from google.genai import types
-from .base import IVisionGrader, GradingResult, CriterionScore
+from .base import (
+    IVisionGrader, GradingResult, CriterionScore,
+    ERROR_KIND_PARSE, ModelOutputParseError,
+)
+from ..json_repair_util import parse_json_hardened
 from ..prompts.loader import load_prompt
 from ..config import settings
 
@@ -84,6 +88,16 @@ class GeminiVisionGrader(IVisionGrader):
                 output_tokens=resp.usage_metadata.candidates_token_count,
                 latency_ms=latency_ms,
             )
+        except ModelOutputParseError as exc:
+            logger.error('{"event":"parse_failure","provider":"gemini","raw_preview":"%s"}',
+                         raw_text[:200].replace('"', "'"))
+            return GradingResult(
+                provider="gemini", model_name=settings.MODEL_NAME, model_version=None,
+                prompt_version=prompt_version, temperature=temperature, ai_score=0.0,
+                reasoning="", raw_response=raw_text, latency_ms=int((time.time() - start_ms) * 1000),
+                error=f"Gemini response parse failure: {exc}",
+                error_kind=ERROR_KIND_PARSE,
+            )
         except Exception as exc:
             logger.exception("Gemini grading failed")
             return GradingResult(
@@ -95,13 +109,12 @@ class GeminiVisionGrader(IVisionGrader):
 
     @staticmethod
     def _parse_response(raw_text: str) -> dict[str, Any]:
-        cleaned = raw_text.strip()
-        if cleaned.startswith("```"):
-            cleaned = "\n".join(cleaned.splitlines()[1:-1]).strip()
-        try:
-            return json.loads(cleaned)
-        except json.JSONDecodeError:
-            start = cleaned.find("{"); end = cleaned.rfind("}")
-            if start >= 0 and end > start:
-                return json.loads(cleaned[start:end + 1])
-            raise
+        """Parse the model response, applying staged JSON repairs.
+
+        Raises ModelOutputParseError on unparseable output so grade() can tag
+        the run as a transient parse failure (retryable), not an API failure.
+        """
+        parsed, err = parse_json_hardened(raw_text)
+        if parsed is None:
+            raise ModelOutputParseError(err or "no content")
+        return parsed

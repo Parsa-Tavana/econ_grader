@@ -19,6 +19,16 @@ class CriterionScore:
     comment: Optional[str] = None
 
 
+#: GradingResult.error_kind value for malformed model output (unparseable
+#: JSON). Transient — callers may retry the run verbatim. Any other failure
+#: (API outage, bad request) leaves error_kind unset.
+ERROR_KIND_PARSE = "parse"
+
+
+class ModelOutputParseError(ValueError):
+    """Raised when a grader cannot extract usable JSON from model output."""
+
+
 @dataclass
 class GradingResult:
     """Normalized result returned by any provider."""
@@ -37,6 +47,7 @@ class GradingResult:
     output_tokens: int = 0
     latency_ms: int = 0
     error: Optional[str] = None
+    error_kind: Optional[str] = None
 
 
 class IVisionGrader(ABC):
