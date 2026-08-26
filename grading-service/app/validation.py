@@ -98,19 +98,11 @@ def validate_grading_response(
 
 
 def parse_json_safe(raw_text: str) -> tuple[dict[str, Any] | None, str | None]:
-    """Try to parse JSON from a model response. Returns (parsed, error)."""
-    cleaned = raw_text.strip()
-    if cleaned.startswith("```"):
-        lines = cleaned.splitlines()
-        if len(lines) >= 2:
-            cleaned = "\n".join(lines[1:-1]).strip()
-    try:
-        return json.loads(cleaned), None
-    except json.JSONDecodeError as e1:
-        start = cleaned.find("{"); end = cleaned.rfind("}")
-        if start >= 0 and end > start:
-            try:
-                return json.loads(cleaned[start:end + 1]), None
-            except json.JSONDecodeError as e2:
-                return None, f"JSON decode failed even after brace extraction: {e2}"
-        return None, f"JSON decode failed: {e1}"
+    """Try to parse JSON from a model response. Returns (parsed, error).
+
+    Delegates to the hardened parser (fence stripping, brace extraction,
+    trailing-comma and unescaped-quote repair, json-repair fallback) so a
+    transient model-output glitch never fails an otherwise-good run.
+    """
+    from .json_repair_util import parse_json_hardened
+    return parse_json_hardened(raw_text)

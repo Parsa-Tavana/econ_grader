@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 
 from .config import settings
 from .graders.factory import get_grader
+from .graders.base import ERROR_KIND_PARSE
 from .schemas import GradeRequest, GradeResponse, CriterionOut, HealthResponse, EvaluationRequest
 from .validation import validate_grading_response, parse_json_safe
 from .attachments import prepare_attachments
@@ -132,21 +133,24 @@ async def grade(req: GradeRequest):
         raise HTTPException(status_code=422, detail=str(exc))
 
     rubric_dict = {"criteria": [c.model_dump() for c in req.rubric.criteria]}
-    # The typed متن سؤال and the question paper's extracted text are ONE
-    # question statement to the AI — either may be empty.
-    combined_question_text = prep.combined_question_text(req.question_text)
     result = grader.grade(
-        question_text=combined_question_text,
-        question_images=prep.question_images,
+        question_text=req.question_text,
+        question_images=question_images,
         rubric=rubric_dict,
-        answer_images=prep.answer_images,
+        answer_images=answer_images,
         max_score=req.max_score,
         temperature=req.temperature,
         prompt_version=req.prompt_version,
-        extra_text=prep.extra_text,
-        rubric_text=prep.rubric_extra_text,
-        rubric_images=prep.rubric_images,
     )
+
+    result = _invoke_grader()
+
+    # A parse-type failure means the model returned malformed JSON — transient.
+    # Repair is attempted in-process first; if it still failed, one verbatim
+    # retry usually recovers the run. API failures are NOT retried here.
+    if getattr(result, "error_kind", None) == ERROR_KIND_PARSE:
+        logger.warning('{"event":"parse_retry","provider":"%s","attempt":2}' % provider)
+        result = _invoke_grader()
 
     latency_ms = result.latency_ms or int((time.time() - t0) * 1000)
 
