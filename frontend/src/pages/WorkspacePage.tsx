@@ -16,6 +16,7 @@ import {
   setTeacherScore as apiSetTeacherScore,
   listAnswersByQuestion,
 } from "../api/answers";
+import { apiErrorMessage } from "../api/client";
 import { getQuestion, getActiveRubric } from "../api/questions";
 import {
   runGrading,
@@ -127,7 +128,7 @@ export default function WorkspacePage() {
       qc.invalidateQueries({ queryKey: ["answer", answerId] });
       toast.info(t("states.gradingStarted"));
     },
-    onError: (e) => toast.error(friendlyError(e, t)),
+    onError: (e) => toast.error(friendlyError(apiErrorMessage(e), t)),
   });
 
   /**

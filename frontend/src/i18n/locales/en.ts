@@ -506,7 +506,7 @@ const en = {
   providers: {
     claude: "Claude",
     gemini: "Gemini",
-    qwen: "Qwen",
+    qwen: "Cline (GLM)",
     any: "Service default",
   },
   status: {

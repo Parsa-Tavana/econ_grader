@@ -172,11 +172,25 @@ public sealed class GradingOrchestrationService : IGradingOrchestrationService
 
     private async Task<Rubric> GetActiveRubricAsync(Guid questionId, CancellationToken ct)
     {
-        return await _db.Rubrics
+        var rubric = await _db.Rubrics
             .Include(r => r.Criteria.OrderBy(c => c.Order))
             .Where(r => r.QuestionId == questionId && r.IsActive)
             .OrderByDescending(r => r.Version)
             .FirstOrDefaultAsync(ct)
             ?? throw new NotFoundException("Active rubric for question", questionId);
+
+        // A rubric with zero criteria AND no rubric document leaves the AI with
+        // nothing to grade against — it either invents criteria (validation
+        // failure) or returns a 0 with no justification. Surface it as a clear
+        // client error. BUT a rubric that ships its criteria as an attached
+        // document (Excel/CSV/PDF/DOCX) is legitimate with zero structured
+        // criteria rows — the grading service extracts the document and the AI
+        // grades against it, so that case must NOT be blocked here.
+        if (rubric.Criteria.Count == 0 && string.IsNullOrEmpty(rubric.FileStorageKey))
+            throw new BusinessRuleException(
+                $"The active rubric for question {questionId} has no criteria and no rubric document — add at least one criterion or upload a rubric file before grading.",
+                "RUBRIC_EMPTY_CRITERIA");
+
+        return rubric;
     }
 }

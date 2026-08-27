@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse
 
 from .config import settings
 from .graders.factory import get_grader
-from .graders.base import ERROR_KIND_PARSE
+from .graders.base import ERROR_KIND_PARSE, ERROR_KIND_TIMEOUT
 from .schemas import GradeRequest, GradeResponse, CriterionOut, HealthResponse, EvaluationRequest
 from .validation import validate_grading_response, parse_json_safe
 from .attachments import prepare_attachments
@@ -70,6 +70,7 @@ def _log_request_response(req: dict, resp: GradeResponse | None, raw_text: str |
         "latency_ms": latency_ms,
         "is_valid": resp.is_valid if resp else False,
         "error": resp.error if resp else None,
+        "validation_errors": resp.validation_errors if resp else [],
         "input_tokens": resp.input_tokens if resp else 0,
         "output_tokens": resp.output_tokens if resp else 0,
         "cost_usd": resp.estimated_cost_usd if resp else 0,
@@ -100,6 +101,77 @@ def get_prompt(version: str):
         return {"version": version, "text": text}
     except Exception as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+def _reconcile_criteria_ids(parsed: dict[str, Any], rubric: dict[str, Any]) -> list[str]:
+    """Best-effort mapping of model-returned criterion ids onto the rubric.
+
+    Models sometimes return paraphrased/self-invented criterion names while
+    scoring perfectly sensibly against the same rubric order. Three passes:
+      1. already-valid ids  → untouched
+      2. case/space-insensitive relabel
+      3. positional remap — only when the model returned exactly as many
+         criteria as the rubric defines; each score is capped at that
+         criterion's max_score.
+    Returns human-readable notes appended to flagged_ambiguities so teachers
+    can see the repair happened; empty list = nothing was changed.
+    """
+    notes: list[str] = []
+    rubric_criteria = rubric.get("criteria", [])
+    defined_ids = [str(c["id"]) for c in rubric_criteria]
+    if not defined_ids:
+        return notes
+    got = parsed.get("criteria_scores")
+    if not isinstance(got, list) or not got:
+        return notes
+
+    defined_lower = {d.lower().strip(): d for d in defined_ids}
+    unknown = [
+        str(c.get("id")) for c in got
+        if isinstance(c, dict) and str(c.get("id")) not in defined_ids
+    ]
+    if not unknown:
+        return notes
+
+    # Pass 2: case/whitespace-insensitive relabel.
+    still_unknown: list[dict] = []
+    for entry in got:
+        if not isinstance(entry, dict):
+            continue
+        cid = str(entry.get("id", ""))
+        if cid in defined_ids:
+            continue
+        match = defined_lower.get(cid.lower().strip())
+        if match:
+            entry["id"] = match
+        else:
+            still_unknown.append(entry)
+
+    # Pass 3: positional remap, only for an exact count match.
+    if still_unknown and len([e for e in got if isinstance(e, dict)]) == len(defined_ids):
+        for entry, rc in zip([e for e in got if isinstance(e, dict)], rubric_criteria):
+            old_id = str(entry.get("id"))
+            entry["id"] = str(rc["id"])
+            cap = float(rc["max_score"])
+            try:
+                s = float(entry.get("score", 0))
+                if s > cap:
+                    entry["score"] = cap
+            except (TypeError, ValueError):
+                pass
+            entry["max_score"] = cap
+            notes.append(
+                f"Criterion id '{old_id}' is not defined in the rubric; "
+                f"re-mapped positionally to '{rc['id']}' with max_score {cap:g}."
+            )
+        return notes
+
+    if still_unknown:
+        notes.append(
+            "Model returned criterion ids not defined in the rubric: "
+            + ", ".join(sorted({str(e.get('id')) for e in still_unknown}))
+        )
+    return notes
 
 
 @app.post("/grade", response_model=GradeResponse, tags=["grading"], dependencies=[Depends(require_internal_key)])
@@ -133,6 +205,14 @@ async def grade(req: GradeRequest):
         raise HTTPException(status_code=422, detail=str(exc))
 
     rubric_dict = {"criteria": [c.model_dump() for c in req.rubric.criteria]}
+    # Excel/PDF/DOCX rubric with no structured criteria rows: the criteria come
+    # entirely from the attached document text the AI is shown. Such runs must
+    # accept criterion ids drawn from that document instead of requiring them
+    # to match structured rows.
+    doc_sourced_rubric = (
+        not req.rubric.criteria
+        and bool(prep.rubric_extra_text or prep.rubric_images)
+    )
 
     # The typed متن سؤال and the question paper's extracted text are ONE
     # question statement to the AI — either may be empty.
@@ -155,10 +235,14 @@ async def grade(req: GradeRequest):
     result = _invoke_grader()
 
     # A parse-type failure means the model returned malformed JSON — transient.
-    # Repair is attempted in-process first; if it still failed, one verbatim
-    # retry usually recovers the run. API failures are NOT retried here.
-    if getattr(result, "error_kind", None) == ERROR_KIND_PARSE:
-        logger.warning('{"event":"parse_retry","provider":"%s","attempt":2}' % provider)
+    # An upstream read/connect timeout is equally transient on free-tier
+    # gateways whose latency swings wildly between identical calls. Both get
+    # one verbatim retry. Budget note: worst case is 2 × upstream timeout plus
+    # overhead — keep it below the .NET side's window in Program.cs so a slow
+    # model always results in a PERSISTED failed run instead of an HTTP 500.
+    if getattr(result, "error_kind", None) in (ERROR_KIND_PARSE, ERROR_KIND_TIMEOUT):
+        logger.warning('{"event":"transient_retry","provider":"%s","kind":"%s","attempt":2}'
+                       % (provider, result.error_kind))
         result = _invoke_grader()
 
     latency_ms = result.latency_ms or int((time.time() - t0) * 1000)
@@ -176,8 +260,17 @@ async def grade(req: GradeRequest):
             is_valid = False
             validation_errors = [parse_err]
         else:
+            # Models occasionally paraphrase criterion ids (e.g. describing the
+            # criterion instead of copying "q6_system1_center"). Map whatever
+            # they returned onto the real rubric before validating.
+            repair_notes = _reconcile_criteria_ids(parsed, rubric_dict)
+            if repair_notes:
+                for n in repair_notes:
+                    logger.warning('{"event":"criteria_id_repair","note":"%s"}' % n)
+                parsed.setdefault("flagged_ambiguities", []).extend(repair_notes)
             is_valid, validation_errors = validate_grading_response(
-                parsed, result.raw_response, req.max_score, rubric_dict
+                parsed, result.raw_response, req.max_score, rubric_dict,
+                allow_unlisted_criteria=doc_sourced_rubric,
             )
 
     estimated_cost = estimate_cost(
@@ -197,6 +290,15 @@ async def grade(req: GradeRequest):
         ai_score=result.ai_score,
         reasoning=result.reasoning,
         criteria_scores=[
+            CriterionOut(
+                criterion_id=str(c.get("id")),
+                score=float(c.get("score", 0)),
+                max_score=float(c.get("max_score", 0)),
+                comment=c.get("comment"),
+            )
+            for c in (parsed or {}).get("criteria_scores", [])
+            if isinstance(c, dict)
+        ] or [
             CriterionOut(criterion_id=c.criterion_id, score=c.score, max_score=c.max_score, comment=c.comment)
             for c in result.criteria_scores
         ],

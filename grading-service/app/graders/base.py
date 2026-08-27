@@ -24,6 +24,10 @@ class CriterionScore:
 #: (API outage, bad request) leaves error_kind unset.
 ERROR_KIND_PARSE = "parse"
 
+#: Transient upstream slowness (gateway read/connect timeout). Retryable
+#: verbatim — free-tier gateways show wild latency variance between calls.
+ERROR_KIND_TIMEOUT = "timeout"
+
 
 class ModelOutputParseError(ValueError):
     """Raised when a grader cannot extract usable JSON from model output."""

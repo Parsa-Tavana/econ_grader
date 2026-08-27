@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 from .base import (
     IVisionGrader, GradingResult, CriterionScore,
-    ERROR_KIND_PARSE, ModelOutputParseError,
+    ERROR_KIND_PARSE, ERROR_KIND_TIMEOUT, ModelOutputParseError,
 )
 from ..json_repair_util import parse_json_hardened
 from ..prompts.loader import load_prompt
@@ -80,10 +80,15 @@ class QwenVisionGrader(IVisionGrader):
                     "temperature": temperature,
                     "max_tokens": settings.DEFAULT_MAX_TOKENS,
                 },
-                timeout=120.0,
+                timeout=140.0,
             )
             resp.raise_for_status()
             body = resp.json()
+            # Some OpenAI-compatible gateways (e.g. api.cline.bot) wrap the
+            # payload in an extra {"data": {...}} envelope — unwrap it so the
+            # standard choices/usage access below keeps working everywhere.
+            if isinstance(body, dict) and isinstance(body.get("data"), dict) and "choices" in body["data"]:
+                body = body["data"]
             raw_text: str = body["choices"][0]["message"]["content"]
             latency_ms = int((time.time() - start_ms) * 1000)
             parsed = self._parse_response(raw_text)
@@ -122,6 +127,17 @@ class QwenVisionGrader(IVisionGrader):
                 reasoning="", raw_response=raw_text, latency_ms=int((time.time() - start_ms) * 1000),
                 error=f"Qwen response parse failure: {exc}",
                 error_kind=ERROR_KIND_PARSE,
+            )
+        except httpx.TimeoutException as exc:
+            # Gateway latency on free-tier routing is highly variable (same
+            # payload: 40s one call, 5min the next) — tag as transient.
+            logger.error('{"event":"upstream_timeout","provider":"qwen"}')
+            return GradingResult(
+                provider="qwen", model_name=model_name, model_version=None,
+                prompt_version=prompt_version, temperature=temperature, ai_score=0.0,
+                reasoning="", raw_response="", latency_ms=int((time.time() - start_ms) * 1000),
+                error=f"Qwen API failure: {exc}",
+                error_kind=ERROR_KIND_TIMEOUT,
             )
         except Exception as exc:
             logger.exception("Qwen grading failed")

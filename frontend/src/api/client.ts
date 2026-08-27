@@ -49,9 +49,10 @@ api.interceptors.response.use(
 /** Extract a readable message from an Axios error / backend problem response. */
 export function apiErrorMessage(err: unknown): string {
   if (axios.isAxiosError(err)) {
-    const data = err.response?.data as { title?: string; detail?: string; errors?: unknown } | string | undefined;
+    const data = err.response?.data as { title?: string; detail?: string; message?: string; errors?: unknown } | string | undefined;
     if (typeof data === "string") return data;
     if (data?.detail) return data.detail;
+    if (data?.message) return data.message;
     if (data?.title) {
       const errs = data.errors;
       if (errs && typeof errs === "object") {

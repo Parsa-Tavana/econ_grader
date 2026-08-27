@@ -23,8 +23,17 @@ def validate_grading_response(
     raw_text: str,
     max_score: float,
     rubric: dict[str, Any],
+    allow_unlisted_criteria: bool = False,
 ) -> tuple[bool, list[str]]:
-    """Return (is_valid, validation_errors)."""
+    """Return (is_valid, validation_errors).
+
+    `allow_unlisted_criteria=True` is for rubrics whose criteria live entirely
+    in an attached document (Excel/PDF/DOCX) rather than structured rows: the
+    model returns criterion ids drawn from that document, which are unknown to
+    the structured rubric. We then validate each score against the rubric's
+    total max_score (and the AI's own per-criterion max_score, if provided)
+    instead of rejecting them as undefined.
+    """
     errors: list[str] = []
 
     if parsed is None:
@@ -67,15 +76,25 @@ def validate_grading_response(
                 continue
             cid = str(c["id"])
             seen_ids.add(cid)
-            if cid not in max_by_id:
-                errors.append(f"Criterion '{cid}' is not defined in the rubric")
-                continue
+            cmx = max_by_id.get(cid)
+            if cmx is None:
+                if not allow_unlisted_criteria:
+                    errors.append(f"Criterion '{cid}' is not defined in the rubric")
+                    continue
+                # Document-sourced rubric: no declared per-criterion max in the
+                # structured rubric, so bound by the AI's own per-criterion
+                # max_score if given, otherwise by the overall max_score.
+                try:
+                    cmx = float(c.get("max_score", max_score))
+                except (TypeError, ValueError):
+                    cmx = max_score
+                if cmx < 0:
+                    cmx = max_score
             try:
                 cs = float(c["score"])
             except (TypeError, ValueError):
                 errors.append(f"Criterion '{cid}' score is not numeric: {c.get('score')!r}")
                 continue
-            cmx = max_by_id[cid]
             if cs < 0 or cs > cmx:
                 errors.append(f"Criterion '{cid}' score {cs} outside [0, {cmx}]")
             crit_sum += cs

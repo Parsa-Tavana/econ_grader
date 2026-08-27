@@ -9,6 +9,8 @@ You will receive:
 
 Instructions:
   - Assess the answer strictly against the rubric — award partial credit only where justified.
+  - In criteria_scores, copy each criterion id EXACTLY character-for-character from the
+    rubric JSON below (the "id" fields). NEVER invent or rephrase criterion ids.
   - The total score is the sum of criteria scores and must not exceed {max_score}.
   - If handwriting is partially unreadable, mention that in flagged_ambiguities and do NOT guess hidden content.
   - Be concise; your reasoning should justify each awarded or withheld mark.
