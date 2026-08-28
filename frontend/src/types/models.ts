@@ -141,8 +141,33 @@ export interface CriterionScore {
 export function parseCriteriaScores(json?: string | null): CriterionScore[] {
   if (!json) return [];
   try {
-    const parsed = JSON.parse(json);
-    return Array.isArray(parsed) ? (parsed as CriterionScore[]) : [];
+    const parsed: unknown = JSON.parse(json);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((c): c is Record<string, unknown> => c != null && typeof c === "object")
+      .map((c) => {
+        // Tolerate legacy key casings — the API contract is camelCase, but rows
+        // persisted by older API builds carry PascalCase keys and the Python
+        // service speaks snake_case. One odd row must never blank the page.
+        const pick = (...keys: string[]): unknown => {
+          for (const key of keys) {
+            if (c[key] !== undefined) return c[key];
+          }
+          return undefined;
+        };
+        const toNum = (v: unknown): number => {
+          const n = typeof v === "number" ? v : Number(v);
+          return Number.isFinite(n) ? n : 0;
+        };
+        const rawId = pick("criterionId", "CriterionId", "criterion_id", "id");
+        const rawComment = pick("comment", "Comment");
+        return {
+          criterionId: rawId != null ? String(rawId) : "unknown",
+          score: toNum(pick("score", "Score")),
+          maxScore: toNum(pick("maxScore", "MaxScore", "max_score")),
+          comment: typeof rawComment === "string" ? rawComment : null,
+        };
+      });
   } catch {
     return [];
   }

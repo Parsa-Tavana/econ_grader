@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -66,16 +66,29 @@ function LanguageToggle() {
 
 function HealthDot() {
   const { t } = useTranslation();
-  const [up, setUp] = useState<boolean | null>(null);
+  // "checking" = first probe still in flight. Afterwards the badge shows the
+  // last SETTLED verdict and never flickers while a new probe is running.
+  const [state, setState] = useState<"checking" | "up" | "down">("checking");
+  const failuresRef = useRef(0);
 
   useEffect(() => {
     let alive = true;
-    const check = () =>
-      healthCheck()
-        .then((h) => alive && setUp(h.dependencies.gradingService.up))
-        .catch(() => alive && setUp(false));
-    check();
-    const id = window.setInterval(check, 30_000);
+    const check = async () => {
+      try {
+        const h = await healthCheck();
+        if (!alive) return;
+        failuresRef.current = 0;
+        setState(h.dependencies.gradingService.up ? "up" : "down");
+      } catch {
+        if (!alive) return;
+        failuresRef.current += 1;
+        // One failed probe (wifi blip, slow probe while a grade is in flight)
+        // must NOT flip the badge red — require two consecutive failures.
+        if (failuresRef.current >= 2) setState("down");
+      }
+    };
+    void check();
+    const id = window.setInterval(check, 10_000);
     return () => {
       alive = false;
       window.clearInterval(id);
@@ -85,17 +98,21 @@ function HealthDot() {
   return (
     <span
       className={clsx(
-        "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium",
-        up === null && "border-zinc-200 text-zinc-400",
-        up === true && "border-emerald-200 bg-emerald-50 text-emerald-700",
-        up === false && "border-red-200 bg-red-50 text-red-600"
+        "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors",
+        state === "checking" && "border-zinc-200 text-zinc-400",
+        state === "up" && "border-emerald-200 bg-emerald-50 text-emerald-700",
+        state === "down" && "border-red-200 bg-red-50 text-red-600"
       )}
       title={t("settings.gradingServiceStatus")}
     >
-      {up === false ? <WifiOff size={13} /> : <Wifi size={13} />}
-      {up === null
+      {state === "down" ? (
+        <WifiOff size={13} />
+      ) : (
+        <Wifi size={13} className={state === "checking" ? "animate-pulse" : undefined} />
+      )}
+      {state === "checking"
         ? t("settings.checkingHealth")
-        : up
+        : state
           ? t("settings.online")
           : t("settings.offline")}
     </span>

@@ -506,7 +506,8 @@ const en = {
   providers: {
     claude: "Claude",
     gemini: "Gemini",
-    qwen: "Cline (GLM)",
+    qwen: "GLM-5.3",
+    gpt: "GPT-5.6-Sol",
     any: "Service default",
   },
   status: {

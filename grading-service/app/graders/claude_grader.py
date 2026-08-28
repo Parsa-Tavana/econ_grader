@@ -61,6 +61,7 @@ class ClaudeVisionGrader(IVisionGrader):
         extra_text: str = "",
         rubric_text: str = "",
         rubric_images: list[tuple[bytes, str]] | None = None,
+        document_only_rubric: bool = False,
     ) -> GradingResult:
         start_ms = time.time()
         model_name = settings.CLAUDE_MODEL or settings.MODEL_NAME
@@ -81,6 +82,15 @@ class ClaudeVisionGrader(IVisionGrader):
         if rubric_text.strip():
             # Extracted text from the uploaded rubric document (DOCX/XLSX)
             content.append({"type": "text", "text": f"Rubric document:\n{rubric_text.strip()}"})
+        if document_only_rubric:
+            # Same document-only rubric guidance as the OpenAI-compatible graders.
+            content.append({"type": "text", "text":
+                "NOTE: The structured rubric JSON above is empty on purpose — this exam's "
+                "rubric is defined ONLY in the 'Rubric document:' text above. Grade strictly "
+                "against that document: use each criterion TITLE from the document as its "
+                "criterion id and the document's own max scores. Do NOT refuse to grade and "
+                "do NOT award zero merely because the structured criteria array is empty."
+            })
         content.append({"type": "text", "text": prompt_text.format(
             question_text=question_text,
             rubric_json=json.dumps(rubric, indent=2),

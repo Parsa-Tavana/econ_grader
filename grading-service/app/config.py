@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: Optional[str] = None
     QWEN_BASE_URL: str = Field(default="http://localhost:8000/v1", description="OpenAI-compatible endpoint for self-hosted Qwen")
     QWEN_API_KEY: str = Field(default="not-needed")
+    QWEN_AUTH_SCHEME: str = Field(default="Bearer", description="Authorization header prefix: Bearer | apikey")
+    GPT_BASE_URL: str = Field(default="", description="OpenAI-compatible endpoint for the GPT slot")
+    GPT_API_KEY: str = Field(default="not-needed")
+    GPT_MODEL: str = Field(default="gpt-5.6-sol")
+    GPT_AUTH_SCHEME: str = Field(default="apikey", description="Authorization header prefix: Bearer | apikey")
     
     # Default grading parameters
     DEFAULT_TEMPERATURE: float = 0.0

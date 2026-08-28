@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { clsx } from "clsx";
 import { useTranslation } from "react-i18next";
 import {
   Bot,
@@ -100,7 +101,11 @@ export default function WorkspacePage() {
   // grading controls
   const [provider, setProvider] = useState("");
   const [temperature, setTemperature] = useState(0);
-  const [runCount, setRunCount] = useState(3);
+  const [runCount, setRunCount] = useState(1);
+
+  // Run-history selection: when null the workspace shows the LATEST valid run;
+  // clicking a run in "تاریخچه اجراها" pins that specific run instead.
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
 
   // review dialog state
   const [reviewMode, setReviewMode] = useState<"accept" | "override" | null>(null);
@@ -115,6 +120,14 @@ export default function WorkspacePage() {
     [runsQ.data]
   );
 
+  // The run whose full detail is shown in the "Latest AI score" card +
+  // review flow. Prefers the user-selected history item; falls back to the
+  // latest valid run (or undefined when there are no runs yet).
+  const activeRun = useMemo(() => {
+    if (activeRunId) return (runsQ.data ?? []).find((r) => r.id === activeRunId) ?? latestValid;
+    return latestValid;
+  }, [runsQ.data, activeRunId, latestValid]);
+
   const runMut = useMutation({
     mutationFn: () =>
       runGrading({
@@ -126,6 +139,8 @@ export default function WorkspacePage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["runs", answerId] });
       qc.invalidateQueries({ queryKey: ["answer", answerId] });
+      // A fresh batch was just produced — show the newest run, not a stale pin.
+      setActiveRunId(null);
       toast.info(t("states.gradingStarted"));
     },
     onError: (e) => toast.error(friendlyError(apiErrorMessage(e), t)),
@@ -140,11 +155,11 @@ export default function WorkspacePage() {
    */
   const reviewMut = useMutation({
     mutationFn: async () => {
-      if (!latestValid || !reviewMode) return;
-      if (reviewMode === "accept") await acceptRun(latestValid.id, note || undefined);
-      else await overrideRun(latestValid.id, overrideScore, note || undefined);
+      if (!activeRun || !reviewMode) return;
+      if (reviewMode === "accept") await acceptRun(activeRun.id, note || undefined);
+      else await overrideRun(activeRun.id, overrideScore, note || undefined);
 
-      const score = reviewMode === "accept" ? latestValid.aiScore : overrideScore;
+      const score = reviewMode === "accept" ? activeRun.aiScore : overrideScore;
       try {
         await apiSetTeacherScore(answerId, score);
       } catch (syncErr) {
@@ -176,7 +191,7 @@ export default function WorkspacePage() {
 
   /** Reviewer identity is derived server-side from the JWT — no input needed. */
   function openReview(mode: "accept" | "override") {
-    if (!latestValid) return;
+    if (!activeRun) return;
     setReviewMode(mode);
   }
 
@@ -191,7 +206,7 @@ export default function WorkspacePage() {
 
   const answer = answerQ.data!;
   const question = questionQ.data;
-  const criteriaScores = latestValid ? parseCriteriaScores(latestValid.criteriaScoresJson) : [];
+  const criteriaScores = activeRun ? parseCriteriaScores(activeRun.criteriaScoresJson) : [];
 
   return (
     <>
@@ -270,16 +285,21 @@ export default function WorkspacePage() {
           <Card>
             <CardHeader
               title={t("workspace.latestAiResult")}
+              subtitle={
+                activeRun
+                  ? `${activeRun.modelName} · ${formatDateTime(activeRun.createdAt, lang)}`
+                  : undefined
+              }
               action={
-                latestValid ? (
-                  <Badge tone={latestValid.isValid ? "green" : "red"}>
+                activeRun ? (
+                  <Badge tone={activeRun.isValid ? "green" : "red"}>
                     <ShieldCheck size={11} />
-                    {latestValid.isValid ? t("grading.valid") : t("status.error")}
+                    {activeRun.isValid ? t("grading.valid") : t("status.error")}
                   </Badge>
                 ) : null
               }
             />
-            {!latestValid ? (
+            {!activeRun ? (
               <p className="py-6 text-center text-sm text-zinc-400">{t("states.noAiResult")}</p>
             ) : (
               <>
@@ -287,7 +307,7 @@ export default function WorkspacePage() {
                   <div className="rounded-xl bg-primary-50 p-3 text-center">
                     <p className="text-[11px] font-medium text-primary-700">AI</p>
                     <p className="mt-1 text-2xl font-bold tabular-nums text-primary-800">
-                      {formatScore(latestValid.aiScore, lang)}
+                      {formatScore(activeRun.aiScore, lang)}
                     </p>
                   </div>
                   <div className="rounded-xl bg-zinc-50 p-3 text-center">
@@ -300,7 +320,7 @@ export default function WorkspacePage() {
                     <p className="text-[11px] font-medium text-zinc-500">{t("workspace.diff")}</p>
                     <p className="mt-1 text-2xl font-bold tabular-nums text-zinc-700">
                       {answer.teacherScore != null
-                        ? formatScore(Math.abs(latestValid.aiScore - answer.teacherScore), lang)
+                        ? formatScore(Math.abs(activeRun.aiScore - answer.teacherScore), lang)
                         : "—"}
                     </p>
                   </div>
@@ -332,40 +352,40 @@ export default function WorkspacePage() {
                   </div>
                 ) : null}
 
-                {latestValid.reasoning ? (
+                {activeRun.reasoning ? (
                   <details className="mt-3 rounded-xl border border-zinc-200 p-3 text-sm">
                     <summary className="cursor-pointer font-medium text-zinc-700">
                       {t("workspace.reasoning")}
                     </summary>
                     <p className="ltr-token mt-2 whitespace-pre-wrap leading-relaxed text-zinc-600">
-                      {latestValid.reasoning}
+                      {activeRun.reasoning}
                     </p>
                   </details>
                 ) : null}
 
                 {/* Raw model response + token usage — full audit trail */}
-                {latestValid.rawAiResponse ? (
+                {activeRun.rawAiResponse ? (
                   <details className="mt-3 rounded-xl border border-zinc-200 p-3 text-sm">
                     <summary className="cursor-pointer font-medium text-zinc-700">
                       {t("workspace.showRawResponse")}
                     </summary>
                     <pre className="ltr-token mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all text-xs text-zinc-500">
-                      {latestValid.rawAiResponse}
+                      {activeRun.rawAiResponse}
                     </pre>
                   </details>
                 ) : null}
                 <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-zinc-400 ltr-token">
                   <span>
-                    {t("workspace.inputTokens")}: {formatNumber(latestValid.inputTokens, lang)}
+                    {t("workspace.inputTokens")}: {formatNumber(activeRun.inputTokens, lang)}
                   </span>
                   <span>
-                    {t("workspace.outputTokens")}: {formatNumber(latestValid.outputTokens, lang)}
+                    {t("workspace.outputTokens")}: {formatNumber(activeRun.outputTokens, lang)}
                   </span>
                   <span>
-                    {t("workspace.estimatedCost")}: {formatCost(latestValid.estimatedCost, lang)}
+                    {t("workspace.estimatedCost")}: {formatCost(activeRun.estimatedCost, lang)}
                   </span>
-                  <span title={formatDateTime(latestValid.createdAt, lang)}>
-                    {timeAgo(latestValid.createdAt, lang)}
+                  <span title={formatDateTime(activeRun.createdAt, lang)}>
+                    {timeAgo(activeRun.createdAt, lang)}
                   </span>
                 </div>
 
@@ -382,9 +402,9 @@ export default function WorkspacePage() {
                   ) : null}
                   <span className="flex-1" />
                   <span className="self-center text-[11px] text-zinc-400">
-                    {latestValid.modelName} · T=
-                    {formatNumber(latestValid.temperature, lang, { maximumFractionDigits: 2 })} ·{" "}
-                    {formatLatency(latestValid.latencyMs, lang)} · {formatCost(latestValid.estimatedCost, lang)}
+                    {activeRun.modelName} · T=
+                    {formatNumber(activeRun.temperature, lang, { maximumFractionDigits: 2 })} ·{" "}
+                    {formatLatency(activeRun.latencyMs, lang)} · {formatCost(activeRun.estimatedCost, lang)}
                   </span>
                 </div>
               </>
@@ -406,6 +426,7 @@ export default function WorkspacePage() {
                   <option value="claude">{t("providers.claude")}</option>
                   <option value="gemini">{t("providers.gemini")}</option>
                   <option value="qwen">{t("providers.qwen")}</option>
+                  <option value="gpt">{t("providers.gpt")}</option>
                 </Select>
               </Field>
               <Field label={t("gradingDialog.temperature")}>
@@ -455,7 +476,13 @@ export default function WorkspacePage() {
                   .sort((x, y) => +new Date(y.createdAt) - +new Date(x.createdAt))
                   .map((r) => (
                     <li key={r.id}>
-                      <RunRow run={r} />
+                      <RunRow
+                        run={r}
+                        selected={activeRunId === r.id}
+                        onClick={() =>
+                          setActiveRunId((cur) => (cur === r.id ? null : r.id))
+                        }
+                      />
                     </li>
                   ))}
               </ul>
@@ -544,7 +571,7 @@ export default function WorkspacePage() {
             ) : (
               <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">
                 {t("workspace.acceptConfirm")}{" "}
-                <strong className="tabular-nums">{formatScore(latestValid?.aiScore, lang)}</strong>
+                <strong className="tabular-nums">{formatScore(activeRun?.aiScore, lang)}</strong>
               </p>
             )}
             <div className="mt-3">
@@ -567,14 +594,42 @@ export default function WorkspacePage() {
   );
 }
 
-function RunRow({ run }: { run: GradingRun }) {
+const PROVIDER_KEYS: Record<string, string> = {
+  claude: "providers.claude",
+  gemini: "providers.gemini",
+  qwen: "providers.qwen",
+  gpt: "providers.gpt",
+};
+
+function RunRow({
+  run,
+  selected = false,
+  onClick,
+}: {
+  run: GradingRun;
+  selected?: boolean;
+  onClick?: () => void;
+}) {
   const { t } = useTranslation();
   const lang = currentLang();
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-zinc-100 bg-zinc-50/60 px-3 py-2 text-xs">
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!onClick}
+      aria-pressed={selected}
+      title={onClick ? t("workspace.runHistory") : undefined}
+      className={clsx(
+        "flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border px-3 py-2 text-start text-xs transition-colors",
+        onClick && "cursor-pointer",
+        selected
+          ? "border-primary-300 bg-primary-50/70 shadow-sm ring-1 ring-primary-200"
+          : "border-zinc-100 bg-zinc-50/60 hover:bg-zinc-100/70"
+      )}
+    >
       <Badge tone={run.isValid ? "green" : "red"}>{formatScore(run.aiScore, lang)}</Badge>
       <span className="font-medium text-zinc-600">{run.modelName}</span>
-      <span className="text-zinc-400">{run.provider}</span>
+      <span className="text-zinc-400">{t(PROVIDER_KEYS[run.provider] ?? run.provider)}</span>
       <span className="text-zinc-400">
         T={formatNumber(run.temperature, lang, { maximumFractionDigits: 2 })}
       </span>
@@ -584,15 +639,16 @@ function RunRow({ run }: { run: GradingRun }) {
         {timeAgo(run.createdAt, lang)}
       </span>
       <span className="flex-1" />
-      {!run.isValid && run.error ? (
-        <span className="w-full truncate text-red-500" title={run.error}>
-          {run.error}
-        </span>
-      ) : run.teacherScoreSnapshot != null ? (
+      {run.teacherScoreSnapshot != null ? (
         <Badge tone="blue">
           {t("workspace.reviewedAs")} {formatScore(run.teacherScoreSnapshot, lang)}
         </Badge>
       ) : null}
-    </div>
+      {!run.isValid && run.error ? (
+        <span className="w-full truncate text-red-500" title={run.error}>
+          {run.error}
+        </span>
+      ) : null}
+    </button>
   );
 }

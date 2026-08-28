@@ -4,6 +4,8 @@ import {
   formatScore,
   formatPercent,
   formatCost,
+  formatDate,
+  formatDateTime,
   formatLatency,
   toFaDigits,
 } from "./format";
@@ -57,5 +59,23 @@ describe("formatLatency", () => {
   it("uses ms under a second and seconds above", () => {
     expect(formatLatency(850, "en")).toBe("850ms");
     expect(formatLatency(1500, "en")).toBe("1.5s");
+  });
+});
+
+describe("formatDateTime", () => {
+  it("renders a UTC instant as Iran local time regardless of host TZ", () => {
+    // 10:30 UTC == 14:00 IRST (UTC+3:30, standard time in January)
+    expect(formatDateTime("2026-01-15T10:30:00.000Z", "en")).toBe("15/01/2026, 14:00");
+  });
+
+  it("renders nullish input as an em-dash", () => {
+    expect(formatDateTime(null, "en")).toBe("—");
+    expect(formatDateTime(undefined, "en")).toBe("—");
+  });
+});
+
+describe("formatDate", () => {
+  it("renders the Iran-local date for a UTC instant", () => {
+    expect(formatDate("2026-01-15T10:30:00.000Z", "en")).toBe("15/01/2026");
   });
 });

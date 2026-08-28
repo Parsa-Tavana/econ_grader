@@ -38,6 +38,7 @@ class GeminiVisionGrader(IVisionGrader):
         extra_text: str = "",
         rubric_text: str = "",
         rubric_images: list[tuple[bytes, str]] | None = None,
+        document_only_rubric: bool = False,
     ) -> GradingResult:
         start_ms = time.time()
         model_name = settings.GEMINI_MODEL or settings.MODEL_NAME
@@ -52,6 +53,15 @@ class GeminiVisionGrader(IVisionGrader):
             parts.append(types.Part.from_text(text=f"Student typed answer documents:\n{extra_text.strip()}"))
         if rubric_text.strip():
             parts.append(types.Part.from_text(text=f"Rubric document:\n{rubric_text.strip()}"))
+        if document_only_rubric:
+            # Same document-only rubric guidance as the other graders.
+            parts.append(types.Part.from_text(text=(
+                "NOTE: The structured rubric JSON above is empty on purpose — this exam's "
+                "rubric is defined ONLY in the 'Rubric document:' text above. Grade strictly "
+                "against that document: use each criterion TITLE from the document as its "
+                "criterion id and the document's own max scores. Do NOT refuse to grade and "
+                "do NOT award zero merely because the structured criteria array is empty."
+            )))
         parts.append(types.Part.from_text(text=prompt_text.format(
             question_text=question_text,
             rubric_json=json.dumps(rubric, indent=2),

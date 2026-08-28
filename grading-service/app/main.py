@@ -230,7 +230,34 @@ async def grade(req: GradeRequest):
             extra_text=prep.extra_text,
             rubric_text=prep.rubric_extra_text,
             rubric_images=prep.rubric_images,
+            document_only_rubric=doc_sourced_rubric,
         )
+
+    def _image_unreadable(result: GradingResult) -> bool:
+        """True when the model says it could NOT read the image(s) at all.
+
+        'Handwriting unreadable' is a legitimate grade and must NOT trigger a
+        retry — strip those English words before matching. The model is now
+        instructed to reply in Persian, so match BOTH languages.
+        """
+        blob = f"{result.raw_response or ''} {result.reasoning or ''}".lower()
+        blob = blob.replace("handwriting", "").replace("handwritten", "")
+        markers = (
+            # English
+            "image could not be read", "image could not be loaded",
+            "could not be read or loaded", "could not be loaded",
+            "cannot read the image", "no image content", "no readable",
+            "nothing in the image", "image is blank", "blank page",
+            "was not readable", "could not be read",
+            # Persian (the SVG-guidance output language)
+            "پاسخی وجود ندارد", "پاسخی موجود نیست", "هیچ پاسخی",
+            "هیچ نمودار", "هیچ ترسیمی", "هیچ جمله توضیحی",
+            "قابل مشاهده نیست", "قابل مشاهده نمی‌باشد",
+            "چیزی در تصویر وجود ندارد", "محتوایی در تصویر",
+            "تصویر خالی", "موردی در تصویر", "در تصویر ارسالی وجود ندارد",
+            "فقط متن چاپی", "تنها متن چاپی", "متن چاپی سؤال",
+        )
+        return any(m in blob for m in markers)
 
     result = _invoke_grader()
 
@@ -243,6 +270,19 @@ async def grade(req: GradeRequest):
     if getattr(result, "error_kind", None) in (ERROR_KIND_PARSE, ERROR_KIND_TIMEOUT):
         logger.warning('{"event":"transient_retry","provider":"%s","kind":"%s","attempt":2}'
                        % (provider, result.error_kind))
+        result = _invoke_grader()
+
+    # The model occasionally claims the image itself could not be read (a
+    # gateway/vision hiccup). When real images were attached AND the model
+    # scored zero while claiming nothing was visible, that is not a legitimate
+    # grade — retry once verbatim.
+    if (
+        result.error is None
+        and (result.ai_score or 0) <= 0
+        and (prep.answer_images or prep.question_images or prep.rubric_images)
+        and _image_unreadable(result)
+    ):
+        logger.warning('{"event":"image_unreadable_retry","provider":"%s","attempt":2}' % provider)
         result = _invoke_grader()
 
     latency_ms = result.latency_ms or int((time.time() - t0) * 1000)

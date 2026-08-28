@@ -101,6 +101,10 @@ services:
     container_name: econgrader-api
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
+      # Process timezone — timestamps are stored UTC and the API serializes
+      # them as Asia/Tehran (see IranDateTimeJsonConverter); this also keeps
+      # Serilog / DateTime.Now-based logs on Iran local time.
+      - TZ=Asia/Tehran
       - ConnectionStrings__DefaultConnection=Server=db,1433;Database=EconGrader;User Id=econgrader_app;Password=$DB_APP_PASSWORD;TrustServerCertificate=True;Encrypt=False
       - GradingService__BaseUrl=http://grading:5001
       - GradingService__InternalKey=${GRADING_INTERNAL_KEY:?Set GRADING_INTERNAL_KEY in .env}

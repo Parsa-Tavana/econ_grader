@@ -35,6 +35,14 @@ public interface IGradingOrchestrationService
 
 public sealed class GradingOrchestrationService : IGradingOrchestrationService
 {
+    // Runs are immutable evidence rows: criteria/validation JSON is persisted in
+    // the SAME camelCase shape the API contract exposes. Default serialization
+    // would emit PascalCase and crash the frontend's criteria table.
+    private static readonly JsonSerializerOptions PersistedJson = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
+
     private readonly IAppDbContext _db;
     private readonly IGradingClient _gradingClient;
     private readonly IFileStorage _storage;
@@ -126,8 +134,8 @@ public sealed class GradingOrchestrationService : IGradingOrchestrationService
             TeacherScoreSnapshot = answer.TeacherScore,
             RawAiResponse = response.RawResponse,
             IsValid = response.IsValid,
-            ValidationErrorsJson = JsonSerializer.Serialize(response.ValidationErrors),
-            CriteriaScoresJson = JsonSerializer.Serialize(response.CriteriaScores),
+            ValidationErrorsJson = JsonSerializer.Serialize(response.ValidationErrors, PersistedJson),
+            CriteriaScoresJson = JsonSerializer.Serialize(response.CriteriaScores, PersistedJson),
             Reasoning = response.Reasoning,
             LatencyMs = response.LatencyMs,
             InputTokens = response.InputTokens,

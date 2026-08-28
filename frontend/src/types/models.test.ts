@@ -22,4 +22,27 @@ describe("parseCriteriaScores", () => {
     expect(parseCriteriaScores("{not json")).toEqual([]);
     expect(parseCriteriaScores(JSON.stringify({ a: 1 }))).toEqual([]);
   });
+
+  it("tolerates legacy PascalCase rows (older API builds)", () => {
+    const json = JSON.stringify([
+      { CriterionId: "ترسیم کلی", Score: 1.0, MaxScore: 1.0, Comment: "ok" },
+    ]);
+    expect(parseCriteriaScores(json)).toEqual([
+      { criterionId: "ترسیم کلی", score: 1, maxScore: 1, comment: "ok" },
+    ]);
+  });
+
+  it("tolerates snake_case rows (python service shape)", () => {
+    const json = JSON.stringify([{ criterion_id: "c1", score: 2, max_score: 4 }]);
+    expect(parseCriteriaScores(json)).toEqual([
+      { criterionId: "c1", score: 2, maxScore: 4, comment: null },
+    ]);
+  });
+
+  it("never throws on rows with missing or non-object entries", () => {
+    const json = JSON.stringify([{}, null, 42]);
+    expect(parseCriteriaScores(json)).toEqual([
+      { criterionId: "unknown", score: 0, maxScore: 0, comment: null },
+    ]);
+  });
 });

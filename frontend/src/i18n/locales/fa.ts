@@ -501,7 +501,8 @@ const fa = {
   providers: {
     claude: "Claude",
     gemini: "Gemini",
-    qwen: "کلاین (GLM)",
+    qwen: "GLM-5.3",
+    gpt: "GPT-5.6-Sol",
     any: "پیش‌فرض سرویس",
   },
   status: {

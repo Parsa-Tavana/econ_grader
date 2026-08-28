@@ -1,4 +1,9 @@
-"""QwenVisionGrader — self-hosted Qwen3-VL via OpenAI-compatible vLLM endpoint."""
+"""OpenAI-compatible graders — one generic client, many gateway slots.
+
+`OpenAICompatibleGrader` is the engine: any /chat/completions gateway with a
+configurable auth scheme. Concrete slots (self-hosted Qwen, GLM, GPT, ...) are
+thin subclasses injecting their own settings.
+"""
 from __future__ import annotations
 
 import base64
@@ -20,12 +25,29 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
     "You are a careful exam grader. Respond with JSON only. "
-    "No markdown fences, no explanation outside JSON."
+    "No markdown fences, no explanation outside JSON. "
+    "Write ALL reasoning, criteria comments, and flagged_ambiguities in Persian (فارسی). "
+    "The response JSON keys must stay exactly as specified (score, reasoning, criteria_scores, confidence, flagged_ambiguities)."
 )
 
 
-class QwenVisionGrader(IVisionGrader):
-    """Calls a self-hosted vLLM/OpenAI-compatible endpoint at QWEN_BASE_URL."""
+class OpenAICompatibleGrader(IVisionGrader):
+    """Generic client for any OpenAI-compatible /chat/completions endpoint."""
+
+    def __init__(
+        self,
+        *,
+        provider_label: str,
+        base_url: str,
+        api_key: str,
+        model: str,
+        auth_scheme: str = "Bearer",
+    ) -> None:
+        self._provider_label = provider_label
+        self._base_url = base_url.rstrip("/")
+        self._api_key = api_key
+        self._model = model
+        self._auth_scheme = (auth_scheme or "Bearer").strip()
 
     def grade(
         self,
@@ -40,9 +62,10 @@ class QwenVisionGrader(IVisionGrader):
         extra_text: str = "",
         rubric_text: str = "",
         rubric_images: list[tuple[bytes, str]] | None = None,
+        document_only_rubric: bool = False,
     ) -> GradingResult:
         start_ms = time.time()
-        model_name = settings.QWEN_MODEL or settings.MODEL_NAME
+        model_name = self._model
         prompt_text = load_prompt(prompt_version)
         rubric_images = rubric_images or []
 
@@ -58,6 +81,18 @@ class QwenVisionGrader(IVisionGrader):
         if rubric_text.strip():
             # Extracted text from the uploaded rubric document (DOCX/XLSX)
             content.append({"type": "text", "text": f"Rubric document:\n{rubric_text.strip()}"})
+        if document_only_rubric:
+            # The structured JSON sees an empty "criteria" array when the rubric
+            # ships ONLY as an uploaded document. Left alone, the "copy ids from
+            # the JSON / never invent ids" instruction makes the model refuse or
+            # award 0. Make the document authoritative instead.
+            content.append({"type": "text", "text":
+                "NOTE: The structured rubric JSON above is empty on purpose — this exam's "
+                "rubric is defined ONLY in the 'Rubric document:' text above. Grade strictly "
+                "against that document: use each criterion TITLE from the document as its "
+                "criterion id and the document's own max scores. Do NOT refuse to grade and "
+                "do NOT award zero merely because the structured criteria array is empty."
+            })
         content.append({"type": "text", "text": prompt_text.format(
             question_text=question_text,
             rubric_json=json.dumps(rubric, indent=2),
@@ -66,9 +101,9 @@ class QwenVisionGrader(IVisionGrader):
 
         try:
             resp = httpx.post(
-                f"{settings.QWEN_BASE_URL.rstrip('/')}/chat/completions",
+                f"{self._base_url}/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {settings.QWEN_API_KEY}",
+                    "Authorization": f"{self._auth_scheme} {self._api_key}",
                     "Content-Type": "application/json",
                 },
                 json={
@@ -94,7 +129,7 @@ class QwenVisionGrader(IVisionGrader):
             parsed = self._parse_response(raw_text)
             usage = body.get("usage", {})
             return GradingResult(
-                provider="qwen",
+                provider=self._provider_label,
                 model_name=model_name,
                 model_version=None,
                 prompt_version=prompt_version,
@@ -119,33 +154,33 @@ class QwenVisionGrader(IVisionGrader):
                 latency_ms=latency_ms,
             )
         except ModelOutputParseError as exc:
-            logger.error('{"event":"parse_failure","provider":"qwen","raw_preview":"%s"}',
-                         raw_text[:200].replace('"', "'"))
+            logger.error('{"event":"parse_failure","provider":"%s","raw_preview":"%s"}',
+                         self._provider_label, raw_text[:200].replace('"', "'"))
             return GradingResult(
-                provider="qwen", model_name=settings.MODEL_NAME, model_version=None,
+                provider=self._provider_label, model_name=model_name, model_version=None,
                 prompt_version=prompt_version, temperature=temperature, ai_score=0.0,
                 reasoning="", raw_response=raw_text, latency_ms=int((time.time() - start_ms) * 1000),
-                error=f"Qwen response parse failure: {exc}",
+                error=f"{self._provider_label} response parse failure: {exc}",
                 error_kind=ERROR_KIND_PARSE,
             )
         except httpx.TimeoutException as exc:
-            # Gateway latency on free-tier routing is highly variable (same
-            # payload: 40s one call, 5min the next) — tag as transient.
-            logger.error('{"event":"upstream_timeout","provider":"qwen"}')
+            # Gateway latency is highly variable (same payload: 40s one call,
+            # 5min the next) — tag as transient.
+            logger.error('{"event":"upstream_timeout","provider":"%s"}', self._provider_label)
             return GradingResult(
-                provider="qwen", model_name=model_name, model_version=None,
+                provider=self._provider_label, model_name=model_name, model_version=None,
                 prompt_version=prompt_version, temperature=temperature, ai_score=0.0,
                 reasoning="", raw_response="", latency_ms=int((time.time() - start_ms) * 1000),
-                error=f"Qwen API failure: {exc}",
+                error=f"{self._provider_label} API failure: {exc}",
                 error_kind=ERROR_KIND_TIMEOUT,
             )
         except Exception as exc:
-            logger.exception("Qwen grading failed")
+            logger.exception("%s grading failed", self._provider_label)
             return GradingResult(
-                provider="qwen", model_name=model_name, model_version=None,
+                provider=self._provider_label, model_name=model_name, model_version=None,
                 prompt_version=prompt_version, temperature=temperature, ai_score=0.0,
                 reasoning="", raw_response="", latency_ms=int((time.time() - start_ms) * 1000),
-                error=f"Qwen API failure: {exc}",
+                error=f"{self._provider_label} API failure: {exc}",
             )
 
     @staticmethod
@@ -159,3 +194,16 @@ class QwenVisionGrader(IVisionGrader):
         if parsed is None:
             raise ModelOutputParseError(err or "no content")
         return parsed
+
+
+class QwenVisionGrader(OpenAICompatibleGrader):
+    """Self-hosted Qwen3-VL via vLLM — the QWEN_* settings slot."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            provider_label="qwen",
+            base_url=settings.QWEN_BASE_URL,
+            api_key=settings.QWEN_API_KEY,
+            model=settings.QWEN_MODEL or settings.MODEL_NAME,
+            auth_scheme=settings.QWEN_AUTH_SCHEME,
+        )

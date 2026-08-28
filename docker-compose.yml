@@ -105,6 +105,10 @@ services:
     container_name: econgrader-api
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
+      # Process timezone — timestamps are stored UTC (DateTime.UtcNow /
+      # GETUTCDATE()) and the API serializes them as Asia/Tehran; this also
+      # keeps Serilog / DateTime.Now-based logs on Iran local time.
+      - TZ=Asia/Tehran
       # Least privilege: econgrader_app has rights ONLY in EconGrader
       # (created by scripts/init-db.sql); sa stays admin-only.
       - ConnectionStrings__DefaultConnection=Server=db,1433;Database=EconGrader;User Id=econgrader_app;Password=$DB_APP_PASSWORD;TrustServerCertificate=True;Encrypt=False

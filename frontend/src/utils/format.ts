@@ -48,6 +48,7 @@ export function formatDateTime(iso: string | null | undefined, lang: AppLang): s
       day: "2-digit",
       hour: "2-digit",
       minute: "2-digit",
+      timeZone: "Asia/Tehran",
     }).format(d);
     return lang === "fa" ? faDateTime(s) : s;
   } catch {
@@ -63,6 +64,7 @@ export function formatDate(iso: string | null | undefined, lang: AppLang): strin
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
+      timeZone: "Asia/Tehran",
     }).format(d);
     return lang === "fa" ? toFaDigits(s) : s;
   } catch {
@@ -78,6 +80,7 @@ export function faDateLong(iso: string | null | undefined): string {
       year: "numeric",
       month: "long",
       day: "numeric",
+      timeZone: "Asia/Tehran",
     }).format(new Date(iso));
   } catch {
     return iso;

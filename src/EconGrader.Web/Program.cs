@@ -13,6 +13,7 @@ using EconGrader.Application.Interfaces;
 using EconGrader.Application.Services;
 using EconGrader.Infrastructure.Services;
 using EconGrader.Infrastructure.Storage;
+using EconGrader.Web.Converters;
 using EconGrader.Web.Middleware;
 using EconGrader.Web.Services;
 
@@ -218,6 +219,11 @@ try
         {
             opts.JsonSerializerOptions.WriteIndented = false;
             opts.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+            // Store timestamps as UTC; serialize them as Iran local time
+            // (Asia/Tehran) on the API. Without this, datetime2 columns read
+            // back via EF Core as DateTimeKind.Unspecified are serialized without
+            // an offset, so clients render them as GMT — ~3.5h off from Iran.
+            opts.JsonSerializerOptions.Converters.Add(new IranDateTimeJsonConverter());
         });
     builder.Services.AddEndpointsApiExplorer();
     builder.Services.AddOpenApi();

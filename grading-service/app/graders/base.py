@@ -81,6 +81,7 @@ class IVisionGrader(ABC):
         extra_text: str = "",
         rubric_text: str = "",
         rubric_images: list[tuple[bytes, str]] | None = None,
+        document_only_rubric: bool = False,
     ) -> GradingResult:
         """Grade one student answer against one question + rubric.
 
