@@ -519,5 +519,25 @@ const en = {
     error: "Error",
     noAi: "No AI grade",
   },
+  },
+  errors: {
+    duplicateQuestionNumber: "A question with this number already exists in this exam",
+    emptyCriteria: "At least one criterion is required",
+    scoreExceedsMax: "Teacher score exceeds the question's maximum score",
+    invalidScore: "Score is not valid",
+    emailTaken: "This email is already registered",
+    lastAdmin: "The last active admin cannot be demoted or deactivated",
+    unsupportedFileType: "Unsupported file type — use PDF, PNG, JPG, DOCX, XLSX or XLS",
+    duplicateStudentId: "Only one answer per student per question is stored",
+    validationError: "Validation error occurred",
+    businessRuleViolation: "A business rule was violated",
+    forbidden: "You are not authorized to perform this action",
+    errorOccurred: "An error occurred",
+    storageAccessDenied: "File storage is not accessible — server configuration issue",
+    storageUnavailable: "File storage is unavailable",
+    dependencyUnavailable: "Grading service unavailable",
+    timeout: "Upstream service timed out",
+  },
 };
+
 export default en;

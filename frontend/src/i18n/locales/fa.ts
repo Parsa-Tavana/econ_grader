@@ -514,5 +514,25 @@ const fa = {
     error: "خطا",
     noAi: "بدون نمره AI",
   },
+},
+  errors: {
+    duplicateQuestionNumber: "این سؤال با این شماره در آزمون وجود دارد",
+    emptyCriteria: "حداقل یک معیار لازم است",
+    scoreExceedsMax: "نمره استاد بیش از حداکثر نمره سؤال است",
+    invalidScore: "نمره نامعتبر است",
+    emailTaken: "این ایمیل قبلاً ثبت شده است",
+    lastAdmin: "آخرین مدیر فعال را نمی‌توان تنزل داد یا حذف کرد",
+    unsupportedFileType: "نوع فایل پشتیبانی نمی‌شود — از PDF، PNG، JPG، DOCX، XLSX یا XLS استفاده کنید",
+    duplicateStudentId: "برای هر دانش‌آموز در هر سؤال فقط یک پاسخ نگهداری می‌شود",
+    validationError: "خطای اعتبارسنجی",
+    businessRuleViolation: "یک قانون تجاری نقض شد",
+    forbidden: "شما مجوز انجام این عملیات را ندارید",
+    errorOccurred: "خطایی رخ داد",
+    storageAccessDenied: "ذخیره فایل قابل دسترسی نیست — مشکل تنظیمات سرور",
+    storageUnavailable: "ذخیره فایل در دسترس نیست",
+    dependencyUnavailable: "سرویس تصحیح در دسترس نیست",
+    timeout: "سرویس بالادست زمان‌بر بود",
+  },
 };
+
 export default fa;

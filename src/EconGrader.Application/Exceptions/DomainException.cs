@@ -26,6 +26,9 @@ public sealed class BusinessRuleException : DomainException
 {
     public BusinessRuleException(string message, string errorCode = "BUSINESS_RULE_VIOLATION")
         : base(message, 400, errorCode) { }
+
+    public BusinessRuleException(string message, string errorCode, int statusCode)
+        : base(message, statusCode, errorCode) { }
 }
 
 /// <summary>External dependency failure (502/503).</summary>

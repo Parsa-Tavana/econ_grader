@@ -59,10 +59,45 @@ export function ErrorState({
   );
 }
 
-/** Maps query errors to a translated, human-friendly message. */
+/**
+ * Stable backend error codes → i18n keys. Addresses the EN-only leak caveat:
+ * server validation errors (`DUPLICATE_QUESTION_NUMBER`, …) now surface in the
+ * active locale instead of raw English.
+ */
+export const errorCodeToKey: Record<string, string> = {
+  NETWORK_ERROR: "common.networkError",
+  DUPLICATE_QUESTION_NUMBER: "errors.duplicateQuestionNumber",
+  EMPTY_CRITERIA: "errors.emptyCriteria",
+  SCORE_EXCEEDS_MAX: "errors.scoreExceedsMax",
+  INVALID_SCORE: "errors.invalidScore",
+  EMAIL_TAKEN: "errors.emailTaken",
+  LAST_ADMIN: "errors.lastAdmin",
+  UNSUPPORTED_MEDIA_TYPE: "errors.unsupportedFileType",
+  DUPLICATE_STUDENT_EXTERNAL_ID: "errors.duplicateStudentId",
+  VALIDATION_ERROR: "errors.validationError",
+  BUSINESS_RULE_VIOLATION: "errors.businessRuleViolation",
+  NOT_FOUND: "states.errorOccurred",
+  FORBIDDEN: "errors.forbidden",
+  INTERNAL_ERROR: "states.errorOccurred",
+  STORAGE_ACCESS_DENIED: "errors.storageAccessDenied",
+  STORAGE_UNAVAILABLE: "errors.storageUnavailable",
+  DEPENDENCY_UNAVAILABLE: "errors.dependencyUnavailable",
+  TIMEOUT: "errors.timeout",
+};
+
+/** Maps query/mutation errors to a translated, human-friendly message.
+ *  Accepts either a raw AxiosError, a pre-extracted message string, or a Error.
+ */
 export function friendlyError(err: unknown, t: (k: string) => string): string {
-  const raw = err instanceof Error ? err.message : String(err);
-  if (raw === "NETWORK_ERROR") return t("common.networkError");
+  // Pull the backend `code` out of an AxiosError shape (pages pass the raw error).
+  if (err && typeof err === "object" && "response" in err) {
+    const data = (err as { response?: { data?: { code?: string; message?: string } } }).response?.data;
+    if (data?.code && errorCodeToKey[data.code]) return t(errorCodeToKey[data.code]);
+    if (data?.message) return data.message;
+  }
+
+  const raw = err instanceof Error ? err.message : typeof err === "string" ? err : String(err);
+  if (errorCodeToKey[raw]) return t(errorCodeToKey[raw]);
   return raw || t("states.errorOccurred");
 }
 

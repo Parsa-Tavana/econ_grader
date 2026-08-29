@@ -47,7 +47,7 @@ public sealed class QuestionService : IQuestionService
         if (duplicate)
             throw new BusinessRuleException(
                 $"A question with number {request.Number} already exists in this exam",
-                "DUPLICATE_QUESTION_NUMBER");
+                "DUPLICATE_QUESTION_NUMBER", 409);
 
         var maxOrder = await _db.Questions
             .Where(q => q.ExamId == request.ExamId)

@@ -46,11 +46,19 @@ api.interceptors.response.use(
   }
 );
 
-/** Extract a readable message from an Axios error / backend problem response. */
+/** Extract a readable message from an Axios error / backend problem response.
+ *  Prefers the stable error `code` (e.g. DUPLICATE_QUESTION_NUMBER) which can be
+ *  translated by the UI layer via `friendlyError`. Falls back to the human message.
+ */
 export function apiErrorMessage(err: unknown): string {
   if (axios.isAxiosError(err)) {
-    const data = err.response?.data as { title?: string; detail?: string; message?: string; errors?: unknown } | string | undefined;
+    const data = err.response?.data as
+      | { code?: string; detail?: string; message?: string; title?: string; errors?: unknown }
+      | string
+      | undefined;
     if (typeof data === "string") return data;
+    // Prefer the stable code for i18n translation
+    if (data?.code) return data.code;
     if (data?.detail) return data.detail;
     if (data?.message) return data.message;
     if (data?.title) {
