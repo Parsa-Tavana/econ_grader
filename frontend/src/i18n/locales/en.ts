@@ -3,6 +3,7 @@ const en = {
     name: "EconGrader",
     tagline: "AI-assisted grading for economics exams",
     loadingApp: "Loading application...",
+    footer: "EconGrader · AI-assisted grading · teacher scores never sent to the AI service",
   },
   nav: {
     dashboard: "Dashboard",

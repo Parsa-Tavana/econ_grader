@@ -225,7 +225,7 @@ export default function AppLayout() {
           </main>
 
           <footer className="border-t border-zinc-100 px-6 py-3 text-center text-[11px] text-zinc-400">
-            EconGrader · AI-assisted grading · teacher scores never sent to the AI service
+            {t("app.footer")}
           </footer>
         </div>
       </div>

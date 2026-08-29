@@ -25,7 +25,7 @@ def get_grader(provider: str | None = None) -> IVisionGrader:
     if p == "qwen":
         from .qwen_grader import QwenVisionGrader
         return QwenVisionGrader()
-    if p == "gpt":
-        from .gpt_grader import GptVisionGrader
-        return GptVisionGrader()
-    raise ValueError(f"Unknown MODEL_PROVIDER '{p}' — expected claude | gemini | qwen | gpt")
+    if p == "stub":
+        from .stub_grader import StubVisionGrader
+        return StubVisionGrader()
+    raise ValueError(f"Unknown MODEL_PROVIDER '{p}' — expected claude | gemini | qwen | stub")

@@ -29,7 +29,12 @@ class Settings(BaseSettings):
     # Default grading parameters
     DEFAULT_TEMPERATURE: float = 0.0
     DEFAULT_MAX_TOKENS: int = 2048
-    
+
+    # Stub provider (MODEL_PROVIDER=stub) — QA/test infrastructure only.
+    # Never used in production. STUB_FAILURE_MODE simulates provider faults.
+    STUB_DELAY_SEC: float = 1.5
+    STUB_FAILURE_MODE: str = ""
+
     # Storage
     IMAGE_STORAGE_ROOT: str = Field(default="storage/images")
     PROMPTS_DIR: str = Field(default="app/prompts")
