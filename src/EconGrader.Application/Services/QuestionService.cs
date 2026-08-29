@@ -1,4 +1,5 @@
 using EconGrader.Application.DTOs;
+using EconGrader.Application.Exceptions;
 using EconGrader.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -39,6 +40,15 @@ public sealed class QuestionService : IQuestionService
 
     public async Task<QuestionDto> CreateAsync(CreateQuestionRequest request, CancellationToken ct = default)
     {
+        // BUG-001: pre-check duplicate question number before hitting the DB unique index.
+        // Without this, a DbUpdateException bubbles up as a generic 500.
+        bool duplicate = await _db.Questions
+            .AnyAsync(q => q.ExamId == request.ExamId && q.Number == request.Number, ct);
+        if (duplicate)
+            throw new BusinessRuleException(
+                $"A question with number {request.Number} already exists in this exam",
+                "DUPLICATE_QUESTION_NUMBER");
+
         var maxOrder = await _db.Questions
             .Where(q => q.ExamId == request.ExamId)
             .MaxAsync(q => (int?)q.DisplayOrder, ct) ?? 0;
@@ -92,6 +102,12 @@ public sealed class QuestionService : IQuestionService
 
     public async Task<RubricDto> CreateRubricAsync(CreateRubricRequest request, Guid createdByUserId, CancellationToken ct = default)
     {
+        // BUG-002: reject empty criteria — creates a "poison" rubric with totalMaxScore=0.
+        if (request.Criteria is null || request.Criteria.Count == 0)
+            throw new BusinessRuleException(
+                "At least one criterion is required",
+                "EMPTY_CRITERIA");
+
         var maxVersion = await _db.Rubrics
             .Where(r => r.QuestionId == request.QuestionId)
             .MaxAsync(r => (int?)r.Version, ct) ?? 0;

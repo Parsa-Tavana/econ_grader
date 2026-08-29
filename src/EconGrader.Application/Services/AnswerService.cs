@@ -60,9 +60,20 @@ public sealed class AnswerService : IAnswerService
 
     public async Task<AnswerDto> SetTeacherScoreAsync(Guid answerId, decimal score, decimal? teacher2Score, CancellationToken ct = default)
     {
-        var a = await _db.Answers.FindAsync([answerId], ct) ?? throw new NotFoundException(nameof(Answer), answerId);
+        var a = await _db.Answers
+                .Include(x => x.Question)
+                .FirstOrDefaultAsync(x => x.Id == answerId, ct)
+            ?? throw new NotFoundException(nameof(Answer), answerId);
         if (score < 0)
             throw new BusinessRuleException("Teacher score cannot be negative", "INVALID_SCORE");
+
+        // BUG-003: bound the teacher score against the question's max — a score of
+        // e.g. 9999 on a /20 question would silently corrupt metrics / agreement.
+        if (a.Question != null && score > a.Question.MaxScore)
+            throw new BusinessRuleException(
+                $"Teacher score {score} exceeds question max score {a.Question.MaxScore}",
+                "SCORE_EXCEEDS_MAX");
+
         a.TeacherScore = score;
         if (teacher2Score.HasValue) a.Teacher2Score = teacher2Score.Value;
         await _db.SaveChangesAsync(ct);
