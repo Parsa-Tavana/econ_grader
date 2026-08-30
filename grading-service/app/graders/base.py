@@ -2,7 +2,7 @@
 
 Every concrete grader must implement `grade()` and return a GradingResult.
 Nothing outside this interface (API layer, .NET app, UI) may call an
-Anthropic/Google/OpenAI SDK directly.
+OpenAI-compatible gateway directly.
 """
 from __future__ import annotations
 

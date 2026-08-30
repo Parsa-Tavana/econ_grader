@@ -141,36 +141,30 @@ class TestGraderParseErrorTagging:
         with pytest.raises(ModelOutputParseError):
             grader_cls._parse_response(raw)
 
-    def test_claude_parse_error_type(self):
-        anthropic = pytest.importorskip("anthropic")
-        from app.graders.claude_grader import ClaudeVisionGrader
-        self._make_grader_result_via_parse(ClaudeVisionGrader, "utterly not json")
-
-    def test_gemini_parse_error_type(self):
-        pytest.importorskip("google.genai")
-        from app.graders.gemini_grader import GeminiVisionGrader
-        self._make_grader_result_via_parse(GeminiVisionGrader, "utterly not json")
-
-    def test_qwen_parse_error_type(self):
+    def test_glm_parse_error_type(self):
         pytest.importorskip("httpx")
-        from app.graders.qwen_grader import QwenVisionGrader
-        self._make_grader_result_via_parse(QwenVisionGrader, "utterly not json")
+        from app.graders.glm_grader import GlmVisionGrader
+        self._make_grader_result_via_parse(GlmVisionGrader, "utterly not json")
 
-    def test_all_three_graders_share_the_hardened_parser(self):
+    def test_gpt_parse_error_type(self):
+        pytest.importorskip("httpx")
+        from app.graders.gpt_grader import GptVisionGrader
+        self._make_grader_result_via_parse(GptVisionGrader, "utterly not json")
+
+    def test_all_graders_share_the_hardened_parser(self):
         import ast
         import inspect
         try:
-            from app.graders.claude_grader import ClaudeVisionGrader
-            from app.graders.gemini_grader import GeminiVisionGrader
-            from app.graders.qwen_grader import QwenVisionGrader
-            classes = [ClaudeVisionGrader, GeminiVisionGrader, QwenVisionGrader]
+            from app.graders.glm_grader import GlmVisionGrader
+            from app.graders.gpt_grader import GptVisionGrader
+            classes = [GlmVisionGrader, GptVisionGrader]
             for cls in classes:
                 src = inspect.getsource(cls._parse_response)
                 assert "parse_json_hardened" in src, cls.__name__
         except ImportError:
-            # Minimal env without provider SDKs: verify via source scan instead.
+            # Minimal env without httpx: verify via source scan instead.
             here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            for name in ("claude_grader", "gemini_grader", "qwen_grader"):
+            for name in ("glm_grader", "gpt_grader", "openai_compatible"):
                 path = os.path.join(here, "app", "graders", f"{name}.py")
                 tree = ast.parse(open(path, encoding="utf-8").read())
                 found = any(

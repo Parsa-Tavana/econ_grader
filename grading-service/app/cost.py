@@ -11,9 +11,9 @@ logger = logging.getLogger(__name__)
 
 # Fallback prices used if pricing.json is absent — update pricing.json instead of editing here.
 _FALLBACK = {
-    "claude": {"input_per_million": 3.0, "output_per_million": 15.0, "image_per_million": 0.0},
-    "gemini": {"input_per_million": 1.5, "output_per_million": 6.0, "image_per_million": 0.0},
-    "qwen":   {"input_per_million": 0.0, "output_per_million": 0.0, "image_per_million": 0.0},
+    "glm":     {"input_per_million": 0.0, "output_per_million": 0.0, "image_per_million": 0.0},
+    "gpt":     {"input_per_million": 0.0, "output_per_million": 0.0, "image_per_million": 0.0},
+    "default": {"input_per_million": 0.0, "output_per_million": 0.0, "image_per_million": 0.0},
 }
 
 

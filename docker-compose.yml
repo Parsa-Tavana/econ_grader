@@ -56,14 +56,21 @@ services:
       dockerfile: ../Dockerfile.grading
     container_name: econgrader-grading
     environment:
-      - MODEL_PROVIDER=claude
-      # Direct Anthropic API. To route through a local gateway (e.g. the
-      # 9router desktop proxy), see docker-compose.override.yml.example.
-      - MODEL_NAME=claude-sonnet-4-5
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-      - QWEN_BASE_URL=http://localhost:8000/v1
-      - QWEN_API_KEY=not-needed
+      - MODEL_PROVIDER=glm
+      # First slot — GLM platform endpoint (default provider). OpenAI-compatible
+      # /chat/completions with "apikey" auth. Values live in .env:
+      #   GLM_BASE_URL — the platform endpoint WITHOUT /chat/completions
+      #   GLM_API_KEY  — the access key (machine-user key)
+      - GLM_BASE_URL=${GLM_BASE_URL:-}
+      - GLM_API_KEY=${GLM_API_KEY:-}
+      - GLM_MODEL=GLM-5.3
+      - GLM_AUTH_SCHEME=apikey
+      # Second slot — GPT-5.6-Sol, reserved for future use (MODEL_PROVIDER=gpt
+      # switches to it). Values live in .env.
+      - GPT_BASE_URL=${GPT_BASE_URL:-}
+      - GPT_API_KEY=${GPT_API_KEY:-}
+      - GPT_MODEL=GPT-5.6-Sol
+      - GPT_AUTH_SCHEME=apikey
       - DEFAULT_TEMPERATURE=0.0
       # Headroom for thinking-style models: they emit a `thinking` block BEFORE
       # the JSON text; if max_tokens is too small, all tokens go to thinking,

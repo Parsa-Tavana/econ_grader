@@ -178,7 +178,8 @@ def _reconcile_criteria_ids(parsed: dict[str, Any], rubric: dict[str, Any]) -> l
 async def grade(req: GradeRequest):
     """Grade one handwritten/typed answer. Teacher score is NEVER required or used."""
     t0 = time.time()
-    provider = req.provider or settings.MODEL_PROVIDER
+    # Deployment-level config only — no per-request provider override.
+    provider = settings.MODEL_PROVIDER
 
     # Convert every attachment (PDF → page PNGs, DOCX → text, PNG/JPG → pass-through).
     for p in [*req.answer_image_paths, *req.question_image_paths, *req.rubric_file_paths]:
@@ -200,7 +201,7 @@ async def grade(req: GradeRequest):
         raise HTTPException(status_code=422, detail="No usable answer files provided")
 
     try:
-        grader = get_grader(provider)
+        grader = get_grader()
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 

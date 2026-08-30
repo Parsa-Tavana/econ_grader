@@ -24,7 +24,6 @@ public interface IGradingOrchestrationService
         Guid answerId,
         decimal temperature,
         string promptVersion,
-        string? provider = null,
         CancellationToken ct = default);
 
     /// <summary>Trimmed runs (no RawAiResponse) for list/timeline views.</summary>
@@ -64,7 +63,7 @@ public sealed class GradingOrchestrationService : IGradingOrchestrationService
     }
 
     public async Task<EnsembleResult> GradeAnswerAsync(
-        Guid answerId, decimal temperature, string promptVersion, string? provider = null, CancellationToken ct = default)
+        Guid answerId, decimal temperature, string promptVersion, CancellationToken ct = default)
     {
         var answer = await _db.Answers
             .Include(a => a.Student)
@@ -108,13 +107,12 @@ public sealed class GradingOrchestrationService : IGradingOrchestrationService
             RubricFilePaths: rubricFiles.ToArray(),
             MaxScore: answer.Question.MaxScore,
             Temperature: temperature,
-            PromptVersion: promptVersion,
-            Provider: provider
+            PromptVersion: promptVersion
         );
 
         _logger.LogInformation(
-            "Grading request prepared AnswerId={AnswerId} QuestionFiles={QuestionFiles} RubricFiles={RubricFiles} Provider={Provider}",
-            answerId, questionFiles.Count, rubricFiles.Count, provider ?? "default");
+            "Grading request prepared AnswerId={AnswerId} QuestionFiles={QuestionFiles} RubricFiles={RubricFiles}",
+            answerId, questionFiles.Count, rubricFiles.Count);
 
         // CRITICAL: teacher score is NEVER sent — only AI's independent view.
         var response = await _gradingClient.GradeAsync(request, ct);

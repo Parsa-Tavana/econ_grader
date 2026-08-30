@@ -342,7 +342,6 @@ const en = {
     title: "Run AI grading",
     desc:
       "Configure the run. The teacher's score is never included in this request.",
-    provider: "Provider",
     model: "Model",
     temperature: "Temperature",
     temperatureHint: "0 = deterministic; up to ~0.4 for ensemble runs",
@@ -504,11 +503,9 @@ const en = {
     hint: "Active on the grading workspace page",
   },
   providers: {
-    claude: "Claude",
-    gemini: "Gemini",
-    qwen: "GLM-5.3",
+    glm: "GLM-5.3",
     gpt: "GPT-5.6-Sol",
-    any: "Service default",
+    claude: "Claude",
   },
   status: {
     pending: "Pending review",

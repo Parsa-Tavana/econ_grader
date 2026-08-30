@@ -26,7 +26,6 @@ class GradeRequest(BaseModel):
     max_score: float
     temperature: float = 0.0
     prompt_version: str = "default"
-    provider: Optional[str] = Field(default=None, description="Override MODEL_PROVIDER for this run")
 
 
 class CriterionOut(BaseModel):

@@ -5,25 +5,25 @@ import json
 
 
 class Settings(BaseSettings):
-    # Provider selection
-    MODEL_PROVIDER: str = Field(default="claude", description="claude | gemini | qwen")
+    # Provider selection — the slot used for every grading run. The user
+    # cannot choose per run; this is deployment-level config only.
+    MODEL_PROVIDER: str = Field(default="glm", description="glm | gpt")
     # Per-provider models — each grader uses its own; MODEL_NAME stays as the
     # legacy fallback so existing deployments keep working.
-    CLAUDE_MODEL: str = Field(default="claude-3-5-sonnet-20241022")
-    GEMINI_MODEL: str = Field(default="gemini-2.0-flash")
-    QWEN_MODEL: str = Field(default="qwen2.5-vl-7b-instruct")
-    MODEL_NAME: str = Field(default="claude-3-5-sonnet-20241022")
+    MODEL_NAME: str = Field(default="GLM-5.3")
     MODEL_VERSION: Optional[str] = None
-    
+
     # API keys (from env/secrets)
-    ANTHROPIC_API_KEY: Optional[str] = None
-    GOOGLE_API_KEY: Optional[str] = None
-    QWEN_BASE_URL: str = Field(default="http://localhost:8000/v1", description="OpenAI-compatible endpoint for self-hosted Qwen")
-    QWEN_API_KEY: str = Field(default="not-needed")
-    QWEN_AUTH_SCHEME: str = Field(default="Bearer", description="Authorization header prefix: Bearer | apikey")
-    GPT_BASE_URL: str = Field(default="", description="OpenAI-compatible endpoint for the GPT slot")
+    # First slot — GLM platform endpoint (default provider). OpenAI-compatible
+    # /chat/completions with "apikey" auth (NOT Bearer).
+    GLM_BASE_URL: str = Field(default="", description="GLM endpoint WITHOUT /chat/completions")
+    GLM_API_KEY: str = Field(default="not-needed")
+    GLM_MODEL: str = Field(default="GLM-5.3")
+    GLM_AUTH_SCHEME: str = Field(default="apikey", description="Authorization header prefix: Bearer | apikey")
+    # Second slot — GPT-5.6-Sol, reserved for future use (MODEL_PROVIDER=gpt).
+    GPT_BASE_URL: str = Field(default="", description="GPT endpoint WITHOUT /chat/completions")
     GPT_API_KEY: str = Field(default="not-needed")
-    GPT_MODEL: str = Field(default="gpt-5.6-sol")
+    GPT_MODEL: str = Field(default="GPT-5.6-Sol")
     GPT_AUTH_SCHEME: str = Field(default="apikey", description="Authorization header prefix: Bearer | apikey")
     
     # Default grading parameters
@@ -36,13 +36,6 @@ class Settings(BaseSettings):
     
     # Logging
     LOG_LEVEL: str = "INFO"
-
-    # Langfuse LLM tracing (optional). When LANGFUSE_PUBLIC_KEY/SECRET_KEY are
-    # set, every Claude call is traced to a self-hosted Langfuse instance —
-    # prompt, response, tokens, latency, cost. Empty keys = fully disabled.
-    LANGFUSE_PUBLIC_KEY: Optional[str] = None
-    LANGFUSE_SECRET_KEY: Optional[str] = None
-    LANGFUSE_HOST: str = "http://langfuse:3000"
 
     # Internal service auth: the .NET API sends X-Internal-Key on every call.
     # Empty key + ENVIRONMENT=production → protected endpoints reject ALL

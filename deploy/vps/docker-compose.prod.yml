@@ -64,14 +64,17 @@ services:
       dockerfile: ../Dockerfile.grading
     container_name: econgrader-grading
     environment:
-      # Production uses the DIRECT Anthropic API. The 9router override lives
-      # only in the gitignored docker-compose.override.yml on the dev machine.
-      - MODEL_PROVIDER=claude
-      - MODEL_NAME=claude-sonnet-4-5
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?Set ANTHROPIC_API_KEY in .env}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
-      - QWEN_BASE_URL=http://localhost:8000/v1
-      - QWEN_API_KEY=not-needed
+      # Exactly two slots, both OpenAI-compatible gateways. GLM is the default;
+      # GPT is reserved for future use (MODEL_PROVIDER=gpt switches to it).
+      - MODEL_PROVIDER=glm
+      - GLM_BASE_URL=${GLM_BASE_URL:?Set GLM_BASE_URL in .env}
+      - GLM_API_KEY=${GLM_API_KEY:?Set GLM_API_KEY in .env}
+      - GLM_MODEL=GLM-5.3
+      - GLM_AUTH_SCHEME=apikey
+      - GPT_BASE_URL=${GPT_BASE_URL:-}
+      - GPT_API_KEY=${GPT_API_KEY:-}
+      - GPT_MODEL=GPT-5.6-Sol
+      - GPT_AUTH_SCHEME=apikey
       - DEFAULT_TEMPERATURE=0.0
       # Headroom for thinking-style models (see root docker-compose.yml note).
       - DEFAULT_MAX_TOKENS=8192

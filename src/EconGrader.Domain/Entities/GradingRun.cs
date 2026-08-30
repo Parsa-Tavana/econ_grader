@@ -10,7 +10,7 @@ public class GradingRun
     public Guid StudentId { get; set; }
     public Student Student { get; set; } = null!;
     
-    public string Provider { get; set; } = null!; // "Claude", "Gemini", "Qwen"
+    public string Provider { get; set; } = null!; // "glm" | "gpt" (legacy rows: "claude"/"qwen")
     public string ModelName { get; set; } = null!; // "claude-3-5-sonnet-20241022"
     public string? ModelVersion { get; set; }
     public decimal Temperature { get; set; }

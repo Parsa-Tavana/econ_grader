@@ -1,8 +1,8 @@
-"""OpenAI-compatible graders — one generic client, many gateway slots.
+"""OpenAI-compatible grading engine.
 
 `OpenAICompatibleGrader` is the engine: any /chat/completions gateway with a
-configurable auth scheme. Concrete slots (self-hosted Qwen, GLM, GPT, ...) are
-thin subclasses injecting their own settings.
+configurable auth scheme. Concrete slots (GLM, GPT) are thin subclasses in
+their own modules injecting their own settings.
 """
 from __future__ import annotations
 
@@ -194,16 +194,3 @@ class OpenAICompatibleGrader(IVisionGrader):
         if parsed is None:
             raise ModelOutputParseError(err or "no content")
         return parsed
-
-
-class QwenVisionGrader(OpenAICompatibleGrader):
-    """Self-hosted Qwen3-VL via vLLM — the QWEN_* settings slot."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            provider_label="qwen",
-            base_url=settings.QWEN_BASE_URL,
-            api_key=settings.QWEN_API_KEY,
-            model=settings.QWEN_MODEL or settings.MODEL_NAME,
-            auth_scheme=settings.QWEN_AUTH_SCHEME,
-        )

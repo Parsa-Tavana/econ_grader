@@ -185,7 +185,6 @@ export interface GradeRunRequest {
   answerId: string;
   temperature?: number;
   promptVersion?: string;
-  provider?: string | null;
   runs?: number;
 }
 

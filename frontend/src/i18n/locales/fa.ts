@@ -341,7 +341,6 @@ const fa = {
     desc: "تنظیمات اجرا را مشخص کنید. نمره استاد هرگز در این درخواست ارسال نمی‌شود.",
     blindGradingNote: "نمره استاد هرگز برای هوش مصنوعی ارسال نمی‌شود",
     runs: "تعداد اجرا",
-    provider: "ارائه‌دهنده",
     model: "مدل",
     temperature: "دما (Temperature)",
     temperatureHint: "۰ = قطعی؛ تا ۰٫۴ مناسب اجراهای گروهی",
@@ -499,11 +498,9 @@ const fa = {
     hint: "در صفحه تصحیح فعال هستند",
   },
   providers: {
-    claude: "Claude",
-    gemini: "Gemini",
-    qwen: "GLM-5.3",
+    glm: "GLM-5.3",
     gpt: "GPT-5.6-Sol",
-    any: "پیش‌فرض سرویس",
+    claude: "Claude",
   },
   status: {
     pending: "در انتظار بررسی",

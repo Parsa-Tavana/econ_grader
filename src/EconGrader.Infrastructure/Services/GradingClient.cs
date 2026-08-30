@@ -52,11 +52,10 @@ public sealed class GradingClient : IGradingClient
             max_score = request.MaxScore,
             temperature = request.Temperature,
             prompt_version = request.PromptVersion,
-            provider = request.Provider,
         };
 
-        _logger.LogInformation("Sending grading request for student {StudentId} / question {QuestionId} via {Provider}",
-            request.StudentId, request.QuestionId, request.Provider ?? "default");
+        _logger.LogInformation("Sending grading request for student {StudentId} / question {QuestionId}",
+            request.StudentId, request.QuestionId);
 
         var resp = await _http.PostAsJsonAsync("/grade", payload, _json, ct);
         var body = await resp.Content.ReadAsStringAsync(ct);

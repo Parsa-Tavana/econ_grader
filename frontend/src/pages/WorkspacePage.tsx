@@ -34,7 +34,6 @@ import {
   Card,
   CardHeader,
   Badge,
-  Select,
   Input,
   Field,
   Button,
@@ -99,7 +98,6 @@ export default function WorkspacePage() {
   const nextAnswer = idx >= 0 && idx < siblings.length - 1 ? siblings[idx + 1] : null;
 
   // grading controls
-  const [provider, setProvider] = useState("");
   const [temperature, setTemperature] = useState(0);
   const [runCount, setRunCount] = useState(1);
 
@@ -132,7 +130,6 @@ export default function WorkspacePage() {
     mutationFn: () =>
       runGrading({
         answerId,
-        provider: provider || null,
         temperature,
         runs: runCount,
       }),
@@ -419,16 +416,7 @@ export default function WorkspacePage() {
               subtitle={t("gradingDialog.blindGradingNote")}
               action={<Bot size={16} className="text-primary-500" />}
             />
-            <div className="grid gap-3 sm:grid-cols-3">
-              <Field label={t("gradingDialog.provider")}>
-                <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
-                  <option value="">{t("providers.any")}</option>
-                  <option value="claude">{t("providers.claude")}</option>
-                  <option value="gemini">{t("providers.gemini")}</option>
-                  <option value="qwen">{t("providers.qwen")}</option>
-                  <option value="gpt">{t("providers.gpt")}</option>
-                </Select>
-              </Field>
+            <div className="grid gap-3 sm:grid-cols-2">
               <Field label={t("gradingDialog.temperature")}>
                 <Input
                   type="number"
@@ -595,10 +583,13 @@ export default function WorkspacePage() {
 }
 
 const PROVIDER_KEYS: Record<string, string> = {
-  claude: "providers.claude",
-  gemini: "providers.gemini",
-  qwen: "providers.qwen",
+  // Current slots.
+  glm: "providers.glm",
   gpt: "providers.gpt",
+  // Legacy labels — old DB rows were stored as "qwen" (the GLM slot's former
+  // internal name) or "claude"; map them so history stays readable.
+  qwen: "providers.glm",
+  claude: "providers.claude",
 };
 
 function RunRow({

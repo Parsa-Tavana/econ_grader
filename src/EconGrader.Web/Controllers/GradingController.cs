@@ -34,8 +34,6 @@ public sealed class GradingController : ControllerBase
         public decimal Temperature { get; set; } = 0m;
         /// <summary>Prompt template version from Python service.</summary>
         public string PromptVersion { get; set; } = "default";
-        /// <summary>Optional provider override: "claude" | "gemini" | "qwen".</summary>
-        public string? Provider { get; set; }
         /// <summary>Run this many times and keep every result (ensemble).</summary>
         public int Runs { get; set; } = 1;
     }
@@ -66,7 +64,7 @@ public sealed class GradingController : ControllerBase
         for (int i = 0; i < request.Runs; i++)
         {
             var result = await _orchestrator.GradeAnswerAsync(
-                request.AnswerId, request.Temperature, request.PromptVersion, request.Provider, ct);
+                request.AnswerId, request.Temperature, request.PromptVersion, ct);
             allRuns.AddRange(result.Runs);
         }
 

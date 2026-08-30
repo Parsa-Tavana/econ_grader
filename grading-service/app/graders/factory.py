@@ -16,16 +16,16 @@ logger = logging.getLogger(__name__)
 def get_grader(provider: str | None = None) -> IVisionGrader:
     """Return a fresh grader instance. Provider defaults to settings.MODEL_PROVIDER."""
     p = (provider or settings.MODEL_PROVIDER).lower()
-    if p == "claude":
-        from .claude_grader import ClaudeVisionGrader
-        return ClaudeVisionGrader()
-    if p == "gemini":
-        from .gemini_grader import GeminiVisionGrader
-        return GeminiVisionGrader()
-    if p == "qwen":
-        from .qwen_grader import QwenVisionGrader
-        return QwenVisionGrader()
+    if p == "glm":
+        from .glm_grader import GlmVisionGrader
+        return GlmVisionGrader()
     if p == "gpt":
         from .gpt_grader import GptVisionGrader
         return GptVisionGrader()
-    raise ValueError(f"Unknown MODEL_PROVIDER '{p}' — expected claude | gemini | qwen | gpt")
+    # Legacy alias: the GLM slot used to be called "qwen" (env QWEN_*) before
+    # the slot was renamed. Keep old configs/DB rows working.
+    if p == "qwen":
+        logger.warning('{"event":"legacy_provider_alias","from":"qwen","to":"glm"}')
+        from .glm_grader import GlmVisionGrader
+        return GlmVisionGrader()
+    raise ValueError(f"Unknown MODEL_PROVIDER '{p}' — expected glm | gpt")
