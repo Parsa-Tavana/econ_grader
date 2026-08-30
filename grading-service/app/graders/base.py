@@ -67,6 +67,12 @@ class IVisionGrader(ABC):
     shown as rubric material, not as part of the question.
     """
 
+    #: Identity of the concrete slot — set by every subclass __init__ and
+    #: surfaced by GET /health so operators can see the ACTIVE model, not the
+    #: legacy MODEL_NAME fallback.
+    provider_label: str = "unknown"
+    model_name: str = "unknown"
+
     @abstractmethod
     def grade(
         self,

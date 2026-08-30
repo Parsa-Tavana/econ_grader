@@ -81,10 +81,19 @@ def _log_request_response(req: dict, resp: GradeResponse | None, raw_text: str |
 
 @app.get("/health", response_model=HealthResponse, tags=["ops"])
 def health():
+    # Report the ACTIVE slot's identity (resolved through the factory) rather
+    # than the legacy MODEL_NAME fallback — with MODEL_PROVIDER=gpt the model
+    # is GPT_MODEL, not MODEL_NAME.
+    try:
+        grader = get_grader()
+        provider, model_name = grader.provider_label, grader.model_name
+    except Exception as exc:  # misconfigured provider must not fail the probe
+        logger.error('{"event":"health_grader_error","error":"%s"}' % exc)
+        provider, model_name = settings.MODEL_PROVIDER, settings.MODEL_NAME
     return HealthResponse(
         status="ok",
-        provider=settings.MODEL_PROVIDER,
-        model_name=settings.MODEL_NAME,
+        provider=provider,
+        model_name=model_name,
         prompts_available=list_prompt_versions(),
     )
 
@@ -199,6 +208,16 @@ async def grade(req: GradeRequest):
     # as extracted text. Only fail when there is nothing to grade at all.
     if not prep.answer_images and not prep.extra_text.strip():
         raise HTTPException(status_code=422, detail="No usable answer files provided")
+
+    # Auditable record of exactly what the grader is about to see — lets you
+    # verify "the answer file reached the AI" (and how many pages of it)
+    # straight from the econgrader-grading logs in Dozzle.
+    logger.info(
+        '{"event":"attachments_prepared","answer_images":%d,"question_images":%d,'
+        '"rubric_images":%d,"answer_text_chars":%d,"rubric_text_chars":%d}'
+        % (len(prep.answer_images), len(prep.question_images), len(prep.rubric_images),
+           len(prep.extra_text), len(prep.rubric_extra_text))
+    )
 
     try:
         grader = get_grader()

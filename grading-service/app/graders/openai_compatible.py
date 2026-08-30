@@ -43,6 +43,8 @@ class OpenAICompatibleGrader(IVisionGrader):
         model: str,
         auth_scheme: str = "Bearer",
     ) -> None:
+        self.provider_label = provider_label
+        self.model_name = model
         self._provider_label = provider_label
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
@@ -71,16 +73,43 @@ class OpenAICompatibleGrader(IVisionGrader):
 
         content: list[dict[str, Any]] = []
         # Order matters: question paper → student answer → rubric document → prompt.
-        for data, media_type in [*question_images, *answer_images, *rubric_images]:
-            content.append({"type": "image_url", "image_url": {
+        # Each image group gets an explicit TEXT label. Without one the model
+        # receives an anonymous stack of pages and can attribute printed
+        # question-paper figures (graphs, tables) to the student's own work
+        # (observed live: a model "saw a diagram in the student answer" that
+        # was actually printed on the question paper).
+        def _img(data: bytes, media_type: str) -> dict[str, Any]:
+            return {"type": "image_url", "image_url": {
                 "url": f"data:{media_type};base64,{base64.b64encode(data).decode()}"
-            }})
+            }}
+
+        def _txt(value: str) -> dict[str, Any]:
+            return {"type": "text", "text": value}
+
+        if question_images:
+            content.append(_txt(
+                "IMAGES OF THE QUESTION PAPER (the printed exam sheet — NOT the student's work):"
+            ))
+            content.extend(_img(d, mt) for d, mt in question_images)
+        if answer_images:
+            content.append(_txt(
+                "IMAGES OF THE STUDENT'S HANDWRITTEN ANSWER — grade ONLY what the student "
+                "actually wrote on these pages; figures/diagrams printed on the question "
+                "paper above are NOT the student's work:"
+            ))
+            total_answer_pages = len(answer_images)
+            for i, (d, mt) in enumerate(answer_images, start=1):
+                content.append(_txt(f"[Student answer — page {i} of {total_answer_pages}]"))
+                content.append(_img(d, mt))
+        if rubric_images:
+            content.append(_txt("IMAGES OF THE UPLOADED RUBRIC DOCUMENT (grading material, not the answer):"))
+            content.extend(_img(d, mt) for d, mt in rubric_images)
         if extra_text.strip():
             # Extracted text from the student's typed answer documents
-            content.append({"type": "text", "text": f"Student typed answer documents:\n{extra_text.strip()}"})
+            content.append(_txt(f"Student typed answer documents:\n{extra_text.strip()}"))
         if rubric_text.strip():
             # Extracted text from the uploaded rubric document (DOCX/XLSX)
-            content.append({"type": "text", "text": f"Rubric document:\n{rubric_text.strip()}"})
+            content.append(_txt(f"Rubric document:\n{rubric_text.strip()}"))
         if document_only_rubric:
             # The structured JSON sees an empty "criteria" array when the rubric
             # ships ONLY as an uploaded document. Left alone, the "copy ids from
