@@ -24,11 +24,18 @@ public sealed class GradingClient : IGradingClient
     private readonly ILogger<GradingClient> _logger;
     private readonly JsonSerializerOptions _json;
 
-    public GradingClient(HttpClient http, ILogger<GradingClient> logger)
+    public GradingClient(HttpClient http, ILogger<GradingClient> logger, Microsoft.Extensions.Options.IOptions<GradingServiceOptions> options)
     {
         _http = http;
         _logger = logger;
-        _json = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        // Internal service auth: when configured, every request to the Python
+        // service carries X-Internal-Key (verified by app/internal_auth.py).
+        var internalKey = options.Value.InternalKey;
+        if (!string.IsNullOrWhiteSpace(internalKey))
+            _http.DefaultRequestHeaders.Add("X-Internal-Key", internalKey);
+        // Python service speaks snake_case (pydantic models without aliases) —
+        // bind ai_score/is_valid/... onto our PascalCase records.
+        _json = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
     }
 
     public async Task<GradingServiceResponse> GradeAsync(GradingServiceRequest request, CancellationToken ct = default)
@@ -37,10 +44,11 @@ public sealed class GradingClient : IGradingClient
         {
             student_id = request.StudentId,
             question_id = request.QuestionId,
-            question_text = request.QuestionText,
+            question_text = request.QuestionText ?? string.Empty,
             rubric = new { criteria = request.Rubric.Criteria.Select(c => new { id = c.Id, description = c.Description, max_score = c.MaxScore }) },
             answer_image_paths = request.AnswerImagePaths,
             question_image_paths = request.QuestionImagePaths,
+            rubric_file_paths = request.RubricFilePaths ?? Array.Empty<string>(),
             max_score = request.MaxScore,
             temperature = request.Temperature,
             prompt_version = request.PromptVersion,

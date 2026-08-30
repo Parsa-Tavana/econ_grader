@@ -18,10 +18,11 @@ class RubricIn(BaseModel):
 class GradeRequest(BaseModel):
     student_id: str = Field(..., description="External student identifier")
     question_id: str = Field(..., description="Question identifier")
-    question_text: str
+    question_text: str = Field(..., description="Typed question text; may be empty when the question arrives only as a document (merged with its extracted text)")
     rubric: RubricIn
     answer_image_paths: list[str] = Field(..., description="Paths to PNG files on disk (already extracted)")
-    question_image_paths: list[str] = Field(default_factory=list)
+    question_image_paths: list[str] = Field(default_factory=list, description="Question paper files (PDF/PNG/JPG/DOCX/XLSX/XLS) — text content is treated as part of the question statement")
+    rubric_file_paths: list[str] = Field(default_factory=list, description="Rubric document files, routed to the AI as rubric material rather than question material")
     max_score: float
     temperature: float = 0.0
     prompt_version: str = "default"

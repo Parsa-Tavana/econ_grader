@@ -3,10 +3,17 @@ uvicorn[standard]==0.34.0
 pydantic==2.10.4
 pydantic-settings==2.7.1
 anthropic==0.42.0
+# Optional Langfuse LLM tracing — imported only when LANGFUSE keys are set
+# (see graders/claude_grader.py); installed so enabling it needs no rebuild.
+langfuse==2.59.7
 google-genai==0.6.0
+json-repair==0.63.4
 pdf2image==1.17.0
 Pillow==11.1.0
 numpy>=1.26
+# Legacy .xls extraction only (.xlsx uses a stdlib reader in attachments.py)
+pandas==2.2.3
+xlrd==2.0.1
 pytest==8.3.4
 httpx==0.28.1
 python-multipart==0.0.20

@@ -1,0 +1,177 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# EconGrader — VPS variant (Option B in DEPLOY.md)
+#
+# Identical service graph to the root docker-compose.yml (2A/2B shape: secrets
+# from .env, no db/grading host ports, loopback API, least-privilege app login,
+# restart+log rotation everywhere). Differences for a bare VPS:
+#   • Caddy terminates TLS with an automatic Let's Encrypt certificate using
+#     SITE_ADDRESS (a real hostname) + ACME_EMAIL from .env — the SAME files as
+#     Option A, so nothing here re-implements TLS.
+#   • Only 80/443 are published; SSH stays on 22 via UFW (see README.md).
+#
+# Usage (from repo root on the VPS):
+#   cp .env.example .env && nano .env      # SITE_ADDRESS=grader.example.dev
+#   docker compose -f deploy/vps/docker-compose.prod.yml up -d --build
+# ═══════════════════════════════════════════════════════════════════════════
+
+services:
+  db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: econgrader-db
+    environment:
+      ACCEPT_EULA: "Y"
+      SA_PASSWORD: ${SA_PASSWORD:?Set SA_PASSWORD in .env}
+      MSSQL_PID: "Developer"
+    volumes:
+      - sql_data:/var/opt/mssql
+    healthcheck:
+      test: [ "CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$SA_PASSWORD\" -Q 'SELECT 1' || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  db-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: econgrader-db-init
+    entrypoint: ["/bin/sh", "/scripts/db-init.sh"]
+    environment:
+      - SA_PASSWORD=${SA_PASSWORD:?Set SA_PASSWORD in .env}
+      - DB_APP_PASSWORD=${DB_APP_PASSWORD:?Set DB_APP_PASSWORD in .env}
+    volumes:
+      - ./../../scripts/init-db.sql:/init-db.sql:ro
+      - ./../../scripts/db-init.sh:/scripts/db-init.sh:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  grading:
+    build:
+      # dockerfile paths are relative to the CONTEXT, not this compose file
+      # (same shape as the root compose file's grading service).
+      context: ./../../grading-service
+      dockerfile: ../Dockerfile.grading
+    container_name: econgrader-grading
+    environment:
+      # Production uses the DIRECT Anthropic API. The 9router override lives
+      # only in the gitignored docker-compose.override.yml on the dev machine.
+      - MODEL_PROVIDER=claude
+      - MODEL_NAME=claude-sonnet-4-5
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?Set ANTHROPIC_API_KEY in .env}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - QWEN_BASE_URL=http://localhost:8000/v1
+      - QWEN_API_KEY=not-needed
+      - DEFAULT_TEMPERATURE=0.0
+      # Headroom for thinking-style models (see root docker-compose.yml note).
+      - DEFAULT_MAX_TOKENS=8192
+      - IMAGE_STORAGE_ROOT=/srv/storage/images
+      - PROMPTS_DIR=/srv/app/prompts
+      - LOG_LEVEL=INFO
+      - GRADING_INTERNAL_KEY=${GRADING_INTERNAL_KEY:?Set GRADING_INTERNAL_KEY in .env}
+      - ENVIRONMENT=production
+    volumes:
+      - app_storage:/srv/storage
+    healthcheck:
+      test: [ "CMD", "curl", "-fsS", "http://localhost:5001/health" ]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  api:
+    build:
+      context: ./../..
+      dockerfile: Dockerfile.api
+    container_name: econgrader-api
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      # Process timezone — timestamps are stored UTC and the API serializes
+      # them as Asia/Tehran (see IranDateTimeJsonConverter); this also keeps
+      # Serilog / DateTime.Now-based logs on Iran local time.
+      - TZ=Asia/Tehran
+      - ConnectionStrings__DefaultConnection=Server=db,1433;Database=EconGrader;User Id=econgrader_app;Password=$DB_APP_PASSWORD;TrustServerCertificate=True;Encrypt=False
+      - GradingService__BaseUrl=http://grading:5001
+      - GradingService__InternalKey=${GRADING_INTERNAL_KEY:?Set GRADING_INTERNAL_KEY in .env}
+      - FileStorage__RootPath=/srv/storage/images
+      - Jwt__SigningKey=${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in .env}
+      - Jwt__BootstrapAdminKey=${JWT_BOOTSTRAP_ADMIN_KEY:-}
+      - Serilog__MinimumLevel__Default=Information
+    volumes:
+      - app_storage:/srv/storage
+      - api_logs:/app/logs
+    ports:
+      # Loopback only — caddy is the single public entry point.
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      grading:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frontend:
+    build:
+      context: ./../../frontend
+      dockerfile: Dockerfile
+    container_name: econgrader-frontend
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  proxy:
+    image: caddy:2-alpine
+    container_name: econgrader-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # On a VPS this MUST be the real hostname (e.g. grader.example.dev) so
+      # Caddy obtains a Let's Encrypt cert automatically.
+      - SITE_ADDRESS=${SITE_ADDRESS:?Set SITE_ADDRESS in .env (your real hostname)}
+      - ACME_EMAIL=${ACME_EMAIL:?Set ACME_EMAIL in .env}
+    volumes:
+      - ./../../Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - frontend
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  sql_data:
+  app_storage:
+  api_logs:
+  caddy_data:
+  caddy_config:

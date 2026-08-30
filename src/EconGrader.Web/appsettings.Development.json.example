@@ -1,0 +1,9 @@
+{
+  "_comment": "Copy this file to appsettings.Development.json (gitignored — same policy as .env). It is loaded ONLY when ASPNETCORE_ENVIRONMENT=Development, i.e. bare `dotnet run`. Production never reads it.",
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=localhost,1433;Database=EconGrader;User Id=sa;Password=<your-local-sa-password>;TrustServerCertificate=True;Encrypt=False"
+  },
+  "Jwt": {
+    "SigningKey": "<openssl rand -base64 48 — any nonempty value; the dev literal is also fine locally>"
+  }
+}

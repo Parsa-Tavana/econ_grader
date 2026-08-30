@@ -6,8 +6,12 @@ COPY ["src/EconGrader.Domain/EconGrader.Domain.csproj", "EconGrader.Domain/"]
 COPY ["src/EconGrader.Application/EconGrader.Application.csproj", "EconGrader.Application/"]
 COPY ["src/EconGrader.Infrastructure/EconGrader.Infrastructure.csproj", "EconGrader.Infrastructure/"]
 COPY ["src/EconGrader.Web/EconGrader.Web.csproj", "EconGrader.Web/"]
-RUN dotnet restore "EconGrader.Web/EconGrader.Web.csproj"
 
+# Fresh restore + publish inside the container — never reuse host obj/
+# artifacts (their project.assets.json embeds Windows NuGet paths that
+# crash FallbackPackagePathResolver on Linux with MSB4018).
+# (No .sln is copied, so the project must be named explicitly.)
+RUN dotnet restore "EconGrader.Web/EconGrader.Web.csproj"
 COPY src/ .
 RUN dotnet publish "EconGrader.Web/EconGrader.Web.csproj" -c Release -o /app/publish --no-restore
 
@@ -17,6 +21,11 @@ WORKDIR /app
 
 # Non-root user
 RUN adduser --disabled-password --gecos "" appuser && chown -R appuser /app
+# Pre-create the shared answer-image storage root with appuser ownership.
+# The named volume seeded from here must be writable by appuser — otherwise
+# LocalFileStorage's Directory.CreateDirectory fails with
+# UnauthorizedAccessException at DI time (surfaced as a misleading 403).
+RUN mkdir -p /srv/storage/images && chown -R appuser /srv/storage
 USER appuser
 
 COPY --from=build /app/publish .

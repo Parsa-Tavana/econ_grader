@@ -14,17 +14,20 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .config import settings
 from .graders.factory import get_grader
+from .graders.base import ERROR_KIND_PARSE, ERROR_KIND_TIMEOUT
 from .schemas import GradeRequest, GradeResponse, CriterionOut, HealthResponse, EvaluationRequest
 from .validation import validate_grading_response, parse_json_safe
+from .attachments import prepare_attachments
 from .cost import estimate_cost
 from .prompts.loader import list_prompt_versions, load_prompt
 from .evaluation import compute_metrics, aggregate_by_provider
+from .internal_auth import require_internal_key
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
@@ -67,6 +70,7 @@ def _log_request_response(req: dict, resp: GradeResponse | None, raw_text: str |
         "latency_ms": latency_ms,
         "is_valid": resp.is_valid if resp else False,
         "error": resp.error if resp else None,
+        "validation_errors": resp.validation_errors if resp else [],
         "input_tokens": resp.input_tokens if resp else 0,
         "output_tokens": resp.output_tokens if resp else 0,
         "cost_usd": resp.estimated_cost_usd if resp else 0,
@@ -85,12 +89,12 @@ def health():
     )
 
 
-@app.get("/prompts", tags=["prompts"])
+@app.get("/prompts", tags=["prompts"], dependencies=[Depends(require_internal_key)])
 def list_prompts():
     return {"prompts": list_prompt_versions()}
 
 
-@app.get("/prompts/{version}", tags=["prompts"])
+@app.get("/prompts/{version}", tags=["prompts"], dependencies=[Depends(require_internal_key)])
 def get_prompt(version: str):
     try:
         text = load_prompt(version)
@@ -99,32 +103,101 @@ def get_prompt(version: str):
         raise HTTPException(status_code=404, detail=str(exc))
 
 
-@app.post("/grade", response_model=GradeResponse, tags=["grading"])
+def _reconcile_criteria_ids(parsed: dict[str, Any], rubric: dict[str, Any]) -> list[str]:
+    """Best-effort mapping of model-returned criterion ids onto the rubric.
+
+    Models sometimes return paraphrased/self-invented criterion names while
+    scoring perfectly sensibly against the same rubric order. Three passes:
+      1. already-valid ids  → untouched
+      2. case/space-insensitive relabel
+      3. positional remap — only when the model returned exactly as many
+         criteria as the rubric defines; each score is capped at that
+         criterion's max_score.
+    Returns human-readable notes appended to flagged_ambiguities so teachers
+    can see the repair happened; empty list = nothing was changed.
+    """
+    notes: list[str] = []
+    rubric_criteria = rubric.get("criteria", [])
+    defined_ids = [str(c["id"]) for c in rubric_criteria]
+    if not defined_ids:
+        return notes
+    got = parsed.get("criteria_scores")
+    if not isinstance(got, list) or not got:
+        return notes
+
+    defined_lower = {d.lower().strip(): d for d in defined_ids}
+    unknown = [
+        str(c.get("id")) for c in got
+        if isinstance(c, dict) and str(c.get("id")) not in defined_ids
+    ]
+    if not unknown:
+        return notes
+
+    # Pass 2: case/whitespace-insensitive relabel.
+    still_unknown: list[dict] = []
+    for entry in got:
+        if not isinstance(entry, dict):
+            continue
+        cid = str(entry.get("id", ""))
+        if cid in defined_ids:
+            continue
+        match = defined_lower.get(cid.lower().strip())
+        if match:
+            entry["id"] = match
+        else:
+            still_unknown.append(entry)
+
+    # Pass 3: positional remap, only for an exact count match.
+    if still_unknown and len([e for e in got if isinstance(e, dict)]) == len(defined_ids):
+        for entry, rc in zip([e for e in got if isinstance(e, dict)], rubric_criteria):
+            old_id = str(entry.get("id"))
+            entry["id"] = str(rc["id"])
+            cap = float(rc["max_score"])
+            try:
+                s = float(entry.get("score", 0))
+                if s > cap:
+                    entry["score"] = cap
+            except (TypeError, ValueError):
+                pass
+            entry["max_score"] = cap
+            notes.append(
+                f"Criterion id '{old_id}' is not defined in the rubric; "
+                f"re-mapped positionally to '{rc['id']}' with max_score {cap:g}."
+            )
+        return notes
+
+    if still_unknown:
+        notes.append(
+            "Model returned criterion ids not defined in the rubric: "
+            + ", ".join(sorted({str(e.get('id')) for e in still_unknown}))
+        )
+    return notes
+
+
+@app.post("/grade", response_model=GradeResponse, tags=["grading"], dependencies=[Depends(require_internal_key)])
 async def grade(req: GradeRequest):
-    """Grade one handwritten answer. Teacher score is NEVER required or used."""
+    """Grade one handwritten/typed answer. Teacher score is NEVER required or used."""
     t0 = time.time()
     provider = req.provider or settings.MODEL_PROVIDER
 
-    answer_images: list[bytes] = []
-    question_images: list[bytes] = []
-    for p in req.answer_image_paths:
-        path = Path(p)
-        if not path.exists():
+    # Convert every attachment (PDF → page PNGs, DOCX → text, PNG/JPG → pass-through).
+    for p in [*req.answer_image_paths, *req.question_image_paths, *req.rubric_file_paths]:
+        if not Path(p).exists():
             raise HTTPException(status_code=422, detail={
                 "stage": "image_load",
                 "file": p,
-                "error": "Answer image file not found",
+                "error": "Answer file not found",
             })
-        answer_images.append(path.read_bytes())
-    for p in req.question_image_paths:
-        path = Path(p)
-        if not path.exists():
-            logger.warning('{"event":"question_image_missing","path":"%s"}' % p)
-            continue
-        question_images.append(path.read_bytes())
 
-    if not answer_images:
-        raise HTTPException(status_code=422, detail="No answer images provided or all files missing")
+    try:
+        prep = prepare_attachments(req.answer_image_paths, req.question_image_paths, req.rubric_file_paths)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    # A typed DOCX answer legitimately has zero images — its content arrives
+    # as extracted text. Only fail when there is nothing to grade at all.
+    if not prep.answer_images and not prep.extra_text.strip():
+        raise HTTPException(status_code=422, detail="No usable answer files provided")
 
     try:
         grader = get_grader(provider)
@@ -132,15 +205,85 @@ async def grade(req: GradeRequest):
         raise HTTPException(status_code=422, detail=str(exc))
 
     rubric_dict = {"criteria": [c.model_dump() for c in req.rubric.criteria]}
-    result = grader.grade(
-        question_text=req.question_text,
-        question_images=question_images,
-        rubric=rubric_dict,
-        answer_images=answer_images,
-        max_score=req.max_score,
-        temperature=req.temperature,
-        prompt_version=req.prompt_version,
+    # Excel/PDF/DOCX rubric with no structured criteria rows: the criteria come
+    # entirely from the attached document text the AI is shown. Such runs must
+    # accept criterion ids drawn from that document instead of requiring them
+    # to match structured rows.
+    doc_sourced_rubric = (
+        not req.rubric.criteria
+        and bool(prep.rubric_extra_text or prep.rubric_images)
     )
+
+    # The typed متن سؤال and the question paper's extracted text are ONE
+    # question statement to the AI — either may be empty.
+    combined_question_text = prep.combined_question_text(req.question_text)
+
+    def _invoke_grader():
+        return grader.grade(
+            question_text=combined_question_text,
+            question_images=prep.question_images,
+            rubric=rubric_dict,
+            answer_images=prep.answer_images,
+            max_score=req.max_score,
+            temperature=req.temperature,
+            prompt_version=req.prompt_version,
+            extra_text=prep.extra_text,
+            rubric_text=prep.rubric_extra_text,
+            rubric_images=prep.rubric_images,
+            document_only_rubric=doc_sourced_rubric,
+        )
+
+    def _image_unreadable(result: GradingResult) -> bool:
+        """True when the model says it could NOT read the image(s) at all.
+
+        'Handwriting unreadable' is a legitimate grade and must NOT trigger a
+        retry — strip those English words before matching. The model is now
+        instructed to reply in Persian, so match BOTH languages.
+        """
+        blob = f"{result.raw_response or ''} {result.reasoning or ''}".lower()
+        blob = blob.replace("handwriting", "").replace("handwritten", "")
+        markers = (
+            # English
+            "image could not be read", "image could not be loaded",
+            "could not be read or loaded", "could not be loaded",
+            "cannot read the image", "no image content", "no readable",
+            "nothing in the image", "image is blank", "blank page",
+            "was not readable", "could not be read",
+            # Persian (the SVG-guidance output language)
+            "پاسخی وجود ندارد", "پاسخی موجود نیست", "هیچ پاسخی",
+            "هیچ نمودار", "هیچ ترسیمی", "هیچ جمله توضیحی",
+            "قابل مشاهده نیست", "قابل مشاهده نمی‌باشد",
+            "چیزی در تصویر وجود ندارد", "محتوایی در تصویر",
+            "تصویر خالی", "موردی در تصویر", "در تصویر ارسالی وجود ندارد",
+            "فقط متن چاپی", "تنها متن چاپی", "متن چاپی سؤال",
+        )
+        return any(m in blob for m in markers)
+
+    result = _invoke_grader()
+
+    # A parse-type failure means the model returned malformed JSON — transient.
+    # An upstream read/connect timeout is equally transient on free-tier
+    # gateways whose latency swings wildly between identical calls. Both get
+    # one verbatim retry. Budget note: worst case is 2 × upstream timeout plus
+    # overhead — keep it below the .NET side's window in Program.cs so a slow
+    # model always results in a PERSISTED failed run instead of an HTTP 500.
+    if getattr(result, "error_kind", None) in (ERROR_KIND_PARSE, ERROR_KIND_TIMEOUT):
+        logger.warning('{"event":"transient_retry","provider":"%s","kind":"%s","attempt":2}'
+                       % (provider, result.error_kind))
+        result = _invoke_grader()
+
+    # The model occasionally claims the image itself could not be read (a
+    # gateway/vision hiccup). When real images were attached AND the model
+    # scored zero while claiming nothing was visible, that is not a legitimate
+    # grade — retry once verbatim.
+    if (
+        result.error is None
+        and (result.ai_score or 0) <= 0
+        and (prep.answer_images or prep.question_images or prep.rubric_images)
+        and _image_unreadable(result)
+    ):
+        logger.warning('{"event":"image_unreadable_retry","provider":"%s","attempt":2}' % provider)
+        result = _invoke_grader()
 
     latency_ms = result.latency_ms or int((time.time() - t0) * 1000)
 
@@ -157,15 +300,24 @@ async def grade(req: GradeRequest):
             is_valid = False
             validation_errors = [parse_err]
         else:
+            # Models occasionally paraphrase criterion ids (e.g. describing the
+            # criterion instead of copying "q6_system1_center"). Map whatever
+            # they returned onto the real rubric before validating.
+            repair_notes = _reconcile_criteria_ids(parsed, rubric_dict)
+            if repair_notes:
+                for n in repair_notes:
+                    logger.warning('{"event":"criteria_id_repair","note":"%s"}' % n)
+                parsed.setdefault("flagged_ambiguities", []).extend(repair_notes)
             is_valid, validation_errors = validate_grading_response(
-                parsed, result.raw_response, req.max_score, rubric_dict
+                parsed, result.raw_response, req.max_score, rubric_dict,
+                allow_unlisted_criteria=doc_sourced_rubric,
             )
 
     estimated_cost = estimate_cost(
         provider=provider.lower(),
         input_tokens=result.input_tokens,
         output_tokens=result.output_tokens,
-        num_images=len(answer_images) + len(question_images),
+        num_images=len(prep.answer_images) + len(prep.question_images) + len(prep.rubric_images),
     )
 
     resp = GradeResponse(
@@ -178,6 +330,15 @@ async def grade(req: GradeRequest):
         ai_score=result.ai_score,
         reasoning=result.reasoning,
         criteria_scores=[
+            CriterionOut(
+                criterion_id=str(c.get("id")),
+                score=float(c.get("score", 0)),
+                max_score=float(c.get("max_score", 0)),
+                comment=c.get("comment"),
+            )
+            for c in (parsed or {}).get("criteria_scores", [])
+            if isinstance(c, dict)
+        ] or [
             CriterionOut(criterion_id=c.criterion_id, score=c.score, max_score=c.max_score, comment=c.comment)
             for c in result.criteria_scores
         ],
@@ -197,7 +358,7 @@ async def grade(req: GradeRequest):
     return resp
 
 
-@app.post("/evaluate", tags=["evaluation"])
+@app.post("/evaluate", tags=["evaluation"], dependencies=[Depends(require_internal_key)])
 def evaluate(req: EvaluationRequest):
     pairs = [(r.get("teacher_score"), r.get("ai_score")) for r in req.runs]
     filtered = [(float(t), float(a)) for t, a in pairs if t is not None and a is not None]
@@ -212,7 +373,7 @@ def evaluate(req: EvaluationRequest):
     return m.__dict__
 
 
-@app.post("/evaluate/by-provider", tags=["evaluation"])
+@app.post("/evaluate/by-provider", tags=["evaluation"], dependencies=[Depends(require_internal_key)])
 def evaluate_by_provider(req: EvaluationRequest):
     return {k: v.__dict__ for k, v in aggregate_by_provider(req.runs).items()}
 

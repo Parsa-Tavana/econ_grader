@@ -1,76 +1,192 @@
-version: "3.9"
-
 services:
   db:
     image: mcr.microsoft.com/mssql/server:2022-latest
     container_name: econgrader-db
     environment:
       ACCEPT_EULA: "Y"
-      SA_PASSWORD: "YourStrong@Passw0rd"
+      # From .env (generate: openssl rand -base64 32). NEVER hardcoded here.
+      SA_PASSWORD: ${SA_PASSWORD:?Set SA_PASSWORD in .env}
       MSSQL_PID: "Developer"
-    ports:
-      - "1433:1433"
+    # Not published to the host — reachable only on the compose network.
+    # Admin/maintenance happens via `docker exec ... sqlcmd`.
     volumes:
       - sql_data:/var/opt/mssql
     healthcheck:
-      test: [ "CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'YourStrong@Passw0rd' -Q 'SELECT 1' || exit 1" ]
+      # $$ = literal $ for the container shell: expands SA_PASSWORD inside
+      # the db container at runtime instead of at compose parse time.
+      test: [ "CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$SA_PASSWORD\" -Q 'SELECT 1' || exit 1" ]
       interval: 10s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # One-shot: create the EconGrader database (if missing) + the
+  # least-privilege econgrader_app login, then exit. api waits for it so a
+  # FRESH volume boot never hits the EF-can't-authenticate-yet deadlock.
+  db-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: econgrader-db-init
+    entrypoint: ["/bin/sh", "/scripts/db-init.sh"]
+    environment:
+      - SA_PASSWORD=${SA_PASSWORD:?Set SA_PASSWORD in .env}
+      - DB_APP_PASSWORD=${DB_APP_PASSWORD:?Set DB_APP_PASSWORD in .env}
+    volumes:
+      - ./scripts/init-db.sql:/init-db.sql:ro
+      - ./scripts/db-init.sh:/scripts/db-init.sh:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   grading:
     build:
-      context: .
-      dockerfile: Dockerfile.grading
+      # Context MUST be the grading-service folder — Dockerfile.grading
+      # copies requirements.txt / app/ / pricing.json relative to it.
+      context: ./grading-service
+      dockerfile: ../Dockerfile.grading
     container_name: econgrader-grading
     environment:
       - MODEL_PROVIDER=claude
-      - MODEL_NAME=claude-3-5-sonnet-20241022
+      # Direct Anthropic API. To route through a local gateway (e.g. the
+      # 9router desktop proxy), see docker-compose.override.yml.example.
+      - MODEL_NAME=claude-sonnet-4-5
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - QWEN_BASE_URL=http://localhost:8000/v1
       - QWEN_API_KEY=not-needed
       - DEFAULT_TEMPERATURE=0.0
-      - DEFAULT_MAX_TOKENS=2048
+      # Headroom for thinking-style models: they emit a `thinking` block BEFORE
+      # the JSON text; if max_tokens is too small, all tokens go to thinking,
+      # the JSON never starts and the run fails with raw_len=0 (observed live).
+      # 8192 covers reasoning + full grading JSON for multi-page PDF answers.
+      - DEFAULT_MAX_TOKENS=8192
+      # MUST match FileStorage__RootPath of the api service below:
+      # the API sends absolute image paths to Python, so both containers
+      # need the identical shared volume mounted at the same path.
       - IMAGE_STORAGE_ROOT=/srv/storage/images
       - PROMPTS_DIR=/srv/app/prompts
       - LOG_LEVEL=INFO
+      # Internal service auth (X-Internal-Key). In production mode an empty
+      # key makes the grading service reject ALL protected requests.
+      - GRADING_INTERNAL_KEY=${GRADING_INTERNAL_KEY:-}
+      - ENVIRONMENT=production
     volumes:
-      - grading_storage:/srv/storage
-    ports:
-      - "5001:5001"
-    depends_on:
-      - db
+      - app_storage:/srv/storage
+    # No host port: only the api talks to it over the compose network.
+    # (No depends_on db — the grading service never queries SQL Server.)
     healthcheck:
+      # /health is intentionally unauthenticated so this check works.
       test: [ "CMD", "curl", "-fsS", "http://localhost:5001/health" ]
       interval: 30s
       timeout: 3s
       retries: 3
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   api:
     build:
+      # Repo-root context — Dockerfile.api copies src/... projects.
       context: .
       dockerfile: Dockerfile.api
     container_name: econgrader-api
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - ConnectionStrings__DefaultConnection=Server=db,1433;Database=EconGrader;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=True;Encrypt=False
+      # Process timezone — timestamps are stored UTC (DateTime.UtcNow /
+      # GETUTCDATE()) and the API serializes them as Asia/Tehran; this also
+      # keeps Serilog / DateTime.Now-based logs on Iran local time.
+      - TZ=Asia/Tehran
+      # Least privilege: econgrader_app has rights ONLY in EconGrader
+      # (created by scripts/init-db.sql); sa stays admin-only.
+      - ConnectionStrings__DefaultConnection=Server=db,1433;Database=EconGrader;User Id=econgrader_app;Password=$DB_APP_PASSWORD;TrustServerCertificate=True;Encrypt=False
       - GradingService__BaseUrl=http://grading:5001
-      - FileStorage__RootPath=/app/storage/images
+      - GradingService__InternalKey=${GRADING_INTERNAL_KEY:-}
+      - FileStorage__RootPath=/srv/storage/images
+      # JWT auth — keys come from .env. Empty or dev-default keys refuse to
+      # boot in Production (see Program.cs).
+      - Jwt__SigningKey=${JWT_SIGNING_KEY}
+      - Jwt__BootstrapAdminKey=${JWT_BOOTSTRAP_ADMIN_KEY}
       - Serilog__MinimumLevel__Default=Information
     volumes:
-      - api_storage:/app/storage
+      # Same volume & path as the grading service (see comment above).
+      - app_storage:/srv/storage
       - api_logs:/app/logs
     ports:
-      - "8080:8080"
+      # Loopback-only: local Vite dev proxy (:5173 → localhost:8080) and
+      # curl checks still work; other machines cannot reach the API directly.
+      - "127.0.0.1:8080:8080"
     depends_on:
       db:
         condition: service_healthy
       grading:
         condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Built SPA served by nginx — internal only; all traffic enters via caddy.
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: econgrader-frontend
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Single public entry point: TLS termination + routing.
+  #   /api/*          → api:8080 (.NET)
+  #   everything else → frontend:80 (nginx SPA)
+  # Set SITE_ADDRESS in .env: ":80" for local HTTP testing, or your
+  # HSTS-preloaded .dev hostname for automatic-Let's-Encrypt HTTPS
+  # (ACME_EMAIL lets Let's Encrypt send expiry notices).
+  proxy:
+    image: caddy:2-alpine
+    container_name: econgrader-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - SITE_ADDRESS=${SITE_ADDRESS:-:80}
+      - ACME_EMAIL=${ACME_EMAIL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - frontend
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   sql_data:
-  grading_storage:
-  api_storage:
+  app_storage:
   api_logs:
+  caddy_data:
+  caddy_config:

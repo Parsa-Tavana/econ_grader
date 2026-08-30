@@ -17,7 +17,7 @@ namespace EconGrader.Web.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "9.0.0")
+                .HasAnnotation("ProductVersion", "9.0.2")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -27,6 +27,14 @@ namespace EconGrader.Web.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ContentType")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("FileName")
+                        .HasMaxLength(260)
+                        .HasColumnType("nvarchar(260)");
 
                     b.Property<string>("ImageStorageKey")
                         .IsRequired()
@@ -124,6 +132,24 @@ namespace EconGrader.Web.Migrations
                     b.HasIndex("CreatedByUserId");
 
                     b.ToTable("Exams");
+                });
+
+            modelBuilder.Entity("EconGrader.Domain.Entities.ExamCorrector", b =>
+                {
+                    b.Property<Guid>("ExamId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CorrectorUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("AssignedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("ExamId", "CorrectorUserId");
+
+                    b.HasIndex("CorrectorUserId");
+
+                    b.ToTable("ExamCorrectors");
                 });
 
             modelBuilder.Entity("EconGrader.Domain.Entities.GradingRun", b =>
@@ -250,11 +276,22 @@ namespace EconGrader.Web.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ContentType")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
                     b.Property<int>("DisplayOrder")
                         .HasColumnType("int");
 
                     b.Property<Guid>("ExamId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("FileName")
+                        .HasMaxLength(260)
+                        .HasColumnType("nvarchar(260)");
+
+                    b.Property<string>("FileStorageKey")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<decimal>("MaxScore")
                         .HasColumnType("decimal(18,2)");
@@ -283,11 +320,22 @@ namespace EconGrader.Web.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ContentType")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
                     b.Property<Guid>("CreatedByUserId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("FileName")
+                        .HasMaxLength(260)
+                        .HasColumnType("nvarchar(260)");
+
+                    b.Property<string>("FileStorageKey")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
@@ -353,10 +401,17 @@ namespace EconGrader.Web.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(450)");
 
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ExternalId")
                         .IsUnique();
+
+                    b.HasIndex("UserId")
+                        .IsUnique()
+                        .HasFilter("[UserId] IS NOT NULL");
 
                     b.ToTable("Students");
                 });
@@ -471,6 +526,25 @@ namespace EconGrader.Web.Migrations
                     b.Navigation("CreatedBy");
                 });
 
+            modelBuilder.Entity("EconGrader.Domain.Entities.ExamCorrector", b =>
+                {
+                    b.HasOne("EconGrader.Domain.Entities.User", "Corrector")
+                        .WithMany()
+                        .HasForeignKey("CorrectorUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("EconGrader.Domain.Entities.Exam", "Exam")
+                        .WithMany()
+                        .HasForeignKey("ExamId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Corrector");
+
+                    b.Navigation("Exam");
+                });
+
             modelBuilder.Entity("EconGrader.Domain.Entities.GradingRun", b =>
                 {
                     b.HasOne("EconGrader.Domain.Entities.Answer", "Answer")
@@ -482,13 +556,13 @@ namespace EconGrader.Web.Migrations
                     b.HasOne("EconGrader.Domain.Entities.Question", "Question")
                         .WithMany("GradingRuns")
                         .HasForeignKey("QuestionId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("EconGrader.Domain.Entities.Student", "Student")
                         .WithMany()
                         .HasForeignKey("StudentId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.Navigation("Answer");
@@ -529,6 +603,16 @@ namespace EconGrader.Web.Migrations
                         .IsRequired();
 
                     b.Navigation("Rubric");
+                });
+
+            modelBuilder.Entity("EconGrader.Domain.Entities.Student", b =>
+                {
+                    b.HasOne("EconGrader.Domain.Entities.User", "User")
+                        .WithOne("Student")
+                        .HasForeignKey("EconGrader.Domain.Entities.Student", "UserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("EconGrader.Domain.Entities.TeacherReview", b =>
@@ -582,6 +666,11 @@ namespace EconGrader.Web.Migrations
             modelBuilder.Entity("EconGrader.Domain.Entities.Student", b =>
                 {
                     b.Navigation("Answers");
+                });
+
+            modelBuilder.Entity("EconGrader.Domain.Entities.User", b =>
+                {
+                    b.Navigation("Student");
                 });
 #pragma warning restore 612, 618
         }

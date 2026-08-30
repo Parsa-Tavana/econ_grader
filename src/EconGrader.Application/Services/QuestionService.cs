@@ -120,11 +120,13 @@ public sealed class QuestionService : IQuestionService
     }
 
     private static QuestionDto Map(Question q) =>
-        new(q.Id, q.ExamId, q.Number, q.Text, q.MaxScore, q.RubricText);
+        new(q.Id, q.ExamId, q.Number, q.Text, q.MaxScore, q.RubricText,
+            FileName: q.FileName, ContentType: q.ContentType);
 
     private static RubricDto MapRubric(Rubric r) => new(
         r.Id, r.QuestionId, r.Version, r.IsActive, r.CreatedAt,
         r.Criteria.Sum(c => c.MaxScore),
         r.Criteria.OrderBy(c => c.Order).Select(c =>
-            new RubricCriterionDto(c.CriterionId, c.Description, c.MaxScore, c.Order)).ToList());
+            new RubricCriterionDto(c.CriterionId, c.Description, c.MaxScore, c.Order)).ToList(),
+        FileName: r.FileName, ContentType: r.ContentType);
 }

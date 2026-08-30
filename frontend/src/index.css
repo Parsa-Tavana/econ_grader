@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Global theming + Vazirmatn base */
+@layer base {
+  :root {
+    --radius: 0.75rem;
+    --border: 220 14% 90%;
+    --muted: 220 14% 96%;
+  }
+
+  * {
+    @apply border-zinc-200;
+  }
+
+  html {
+    @apply antialiased;
+    scrollbar-gutter: stable;
+  }
+
+  html[dir="rtl"] body {
+    font-family: "Vazirmatn", "Inter", system-ui, sans-serif;
+    font-feature-settings: "ss01" 1;
+  }
+  html[dir="ltr"] body {
+    font-family: "Inter", "Vazirmatn", system-ui, sans-serif;
+  }
+
+  body {
+    @apply bg-zinc-50 text-zinc-900;
+  }
+
+  /* Fix Vazirmatn + LTR technical tokens inside RTL text */
+  .ltr-token {
+    direction: ltr;
+    unicode-bidi: plaintext;
+    display: inline-block;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    inline-size: 8px;
+    block-size: 8px;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-zinc-300 rounded-full;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-zinc-100;
+  }
+}
+
+/* Utilities */
+@layer utilities {
+  .app-surface {
+    @apply bg-white border border-zinc-200 rounded-xl;
+  }
+  .app-card {
+    @apply bg-white border border-zinc-200 rounded-xl;
+  }
+}

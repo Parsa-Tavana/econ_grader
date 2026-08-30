@@ -39,6 +39,8 @@ public sealed class ExamService : IExamService
 
     public async Task<ExamDto> CreateAsync(CreateExamRequest request, Guid createdByUserId, CancellationToken ct = default)
     {
+        // createdByUserId comes from the validated JWT (never a header) — the
+        // account must already exist; FK violation would indicate a bug upstream.
         var exam = new Exam { Name = request.Name, Year = request.Year, Description = request.Description, CreatedByUserId = createdByUserId };
         _db.Exams.Add(exam);
         await _db.SaveChangesAsync(ct);

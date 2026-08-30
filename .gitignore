@@ -34,7 +34,12 @@ htmlcov/
 
 # ===== Runtime application data =====
 # uploaded exam answer images (created by LocalFileStorage at runtime)
-storage/
+# ANCHORED to repo root only — an unanchored "storage/" also matches
+# src/EconGrader.Infrastructure/Storage/ source code on case-insensitive FS.
+/storage/
+/storage/images/
+# same, for local `dotnet run` from the Web project dir
+/src/EconGrader.Web/storage/
 # Serilog output
 logs/
 *.log
@@ -43,6 +48,10 @@ logs/
 node_modules/
 dist/
 .vite/
+# TypeScript incremental build artifacts
+*.tsbuildinfo
+# Test coverage
+coverage/
 
 # ===== IDE =====
 .idea/
@@ -62,3 +71,16 @@ Desktop.ini
 
 # ===== Docker runtime leftovers =====
 docker-compose.override.yml
+# local-only GUI/observability stack (SSMS port, Dozzle, Filebrowser, Langfuse)
+docker-compose.observability.yml
+# generated local credentials sheet (contains REAL passwords, mirrors .env)
+/CREDENTIALS.md
+
+# Backup output from scripts/backup.sh / backup.ps1 (contains exam data)
+/backups/
+
+# Local dev overrides contain real dev credentials (same policy as .env)
+src/EconGrader.Web/appsettings.Development.json
+
+# QA session artifacts (evidence, fixtures, repro scripts)
+/qa-artifacts/
