@@ -5,6 +5,7 @@ import { FileText, Image as ImageIcon, Link2, Trash2, Upload, Download, Loader2 
 import { Button } from "./ui/Button";
 import { friendlyError } from "./ui/Feedback";
 import { useToast } from "../hooks/useToast";
+import { fetchAuthenticatedFile } from "../api/client";
 
 export const ACCEPTED_TYPES = ".pdf,.png,.jpg,.jpeg,.docx,.xlsx,.xls";
 
@@ -105,6 +106,62 @@ export function FileAttachment({
     }
   }
 
+  /** Trigger a browser "save as" for an object URL, then release it. */
+  function saveBlob(file: { url: string; fileName: string }) {
+    const a = document.createElement("a");
+    a.href = file.url;
+    a.download = file.fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(file.url), 10_000);
+  }
+
+  /**
+   * Authenticated download — the stored files stream through [Authorize]
+   * endpoints, and a bare <a href> navigation cannot attach the JWT (401).
+   * Fetch the blob with the shared axios client, then save it locally.
+   */
+  async function handleDownload() {
+    if (!fileUrl) return;
+    setBusy(true);
+    try {
+      const file = await fetchAuthenticatedFile(fileUrl, fileName ?? "file");
+      saveBlob(file);
+    } catch (err) {
+      toast.error(friendlyError(err, t));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Authenticated "open in new tab". The blank tab must be opened
+   * synchronously inside the click handler — window.open after an await is
+   * treated as a popup and blocked by browsers.
+   */
+  async function handleOpen() {
+    if (!fileUrl) return;
+    const tab = window.open("", "_blank");
+    setBusy(true);
+    try {
+      const file = await fetchAuthenticatedFile(fileUrl, fileName ?? "file");
+      if (!tab) {
+        // Popup was blocked anyway — fall back to a normal download.
+        saveBlob(file);
+        return;
+      }
+      tab.location.href = file.url;
+      // Give the viewer tab time to fully load the blob before revoking it.
+      setTimeout(() => URL.revokeObjectURL(file.url), 60_000);
+    } catch (err) {
+      tab?.close();
+      toast.error(friendlyError(err, t));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div
       className={clsx(
@@ -122,21 +179,18 @@ export function FileAttachment({
       {fileName ? (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <TypeIcon contentType={contentType} />
-          <a
-            href={fileUrl ?? "#"}
-            target="_blank"
-            rel="noreferrer"
+          <button
+            type="button"
+            onClick={handleOpen}
             className="min-w-0 max-w-[220px] truncate text-sm font-medium text-primary-700 hover:underline"
             title={fileName}
           >
             {fileName}
-          </a>
+          </button>
           <span className="flex-1" />
-          <a href={fileUrl ?? "#"} download title={t("common.download")}>
-            <Button size="sm" variant="ghost" aria-label={t("common.download")}>
-              <Download size={13} />
-            </Button>
-          </a>
+          <Button size="sm" variant="ghost" onClick={handleDownload} disabled={busy} title={t("common.download")} aria-label={t("common.download")}>
+            <Download size={13} />
+          </Button>
           {canEdit ? (
             <>
               <Button size="sm" variant="ghost" onClick={() => inputRef.current?.click()} disabled={busy}>

@@ -55,8 +55,9 @@ export async function uploadQuestionFile(questionId: string, file: File): Promis
   });
   return data;
 }
+/** Authenticated stream URL — pass to fetchAuthenticatedFile, never <a href>. */
 export function questionFileUrl(questionId: string): string {
-  return `/api/questions/${questionId}/file`;
+  return `/questions/${questionId}/file`;
 }
 export async function deleteQuestionFile(questionId: string): Promise<void> {
   await api.delete(`/questions/${questionId}/file`);
@@ -70,8 +71,9 @@ export async function uploadRubricFile(questionId: string, file: File): Promise<
   });
   return data;
 }
+/** Authenticated stream URL — pass to fetchAuthenticatedFile, never <a href>. */
 export function rubricFileUrl(questionId: string): string {
-  return `/api/questions/${questionId}/rubric/file`;
+  return `/questions/${questionId}/rubric/file`;
 }
 export async function deleteRubricFile(questionId: string): Promise<void> {
   await api.delete(`/questions/${questionId}/rubric/file`);

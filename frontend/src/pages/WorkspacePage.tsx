@@ -13,11 +13,10 @@ import {
 } from "lucide-react";
 import {
   getAnswer,
-  getAnswerImageUrl,
   setTeacherScore as apiSetTeacherScore,
   listAnswersByQuestion,
 } from "../api/answers";
-import { apiErrorMessage } from "../api/client";
+import { apiErrorMessage, fetchAuthenticatedFile } from "../api/client";
 import { getQuestion, getActiveRubric } from "../api/questions";
 import {
   runGrading,
@@ -234,11 +233,30 @@ export default function WorkspacePage() {
               <div className="flex h-40 flex-col items-center justify-center gap-2 text-sm text-zinc-500">
                 <FileText size={22} className="text-red-400" />
                 <span>{answer.fileName ?? t("viewer.answerScan")}</span>
-                <a href={getAnswerImageUrl(answer.id)} target="_blank" rel="noreferrer">
-                  <Button size="sm" variant="secondary">
-                    {t("common.download")}
-                  </Button>
-                </a>
+                {/* Authenticated download — a bare <a href> cannot attach the JWT and gets 401. */}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={async () => {
+                    try {
+                      const file = await fetchAuthenticatedFile(
+                        `/answers/${answer.id}/image`,
+                        answer.fileName ?? "answer"
+                      );
+                      const a = document.createElement("a");
+                      a.href = file.url;
+                      a.download = file.fileName;
+                      document.body.appendChild(a);
+                      a.click();
+                      a.remove();
+                      setTimeout(() => URL.revokeObjectURL(file.url), 10_000);
+                    } catch (e) {
+                      toast.error(friendlyError(apiErrorMessage(e), t));
+                    }
+                  }}
+                >
+                  {t("common.download")}
+                </Button>
               </div>
             ) : (
               /* Authenticated blob fetch — bare img/iframe URLs get 401 (no JWT header). */

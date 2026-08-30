@@ -46,6 +46,33 @@ api.interceptors.response.use(
   }
 );
 
+/**
+ * Authenticated file fetch — a bare <a href> / window.open CANNOT attach the
+ * JWT, so those requests hit the API unauthenticated and get 401 (the same
+ * pitfall AuthFileView fixes for inline previews). Fetch the blob through the
+ * shared axios instance (interceptor adds the token) and hand back an object
+ * URL plus the filename from Content-Disposition (falls back to fallbackName).
+ * Caller owns the returned object URL — revoke it when done.
+ */
+export async function fetchAuthenticatedFile(
+  path: string,
+  fallbackName: string
+): Promise<{ url: string; fileName: string }> {
+  const resp = await api.get<Blob>(path, { responseType: "blob" });
+  const cd = (resp.headers["content-disposition"] as string | undefined) ?? "";
+  // Match filename="..." and filename*=UTF-8''... (RFC 5987) forms.
+  const match = cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+  let fileName = fallbackName;
+  if (match?.[1]) {
+    try {
+      fileName = decodeURIComponent(match[1]);
+    } catch {
+      fileName = match[1];
+    }
+  }
+  return { url: URL.createObjectURL(resp.data), fileName };
+}
+
 /** Extract a readable message from an Axios error / backend problem response. */
 export function apiErrorMessage(err: unknown): string {
   if (axios.isAxiosError(err)) {
