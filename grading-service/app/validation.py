@@ -43,16 +43,17 @@ def validate_grading_response(
         return False, ["Parsed JSON is not an object"]
 
     # score field
+    score_val: float | None = None
     if "score" not in parsed:
         errors.append("Missing required field 'score'")
     else:
         try:
-            s = float(parsed["score"])
+            score_val = float(parsed["score"])
         except (TypeError, ValueError):
             errors.append(f"'score' is not numeric: {parsed['score']!r}")
         else:
-            if s < 0 or s > max_score:
-                errors.append(f"'score' {s} outside allowed range [0, {max_score}]")
+            if score_val < 0 or score_val > max_score:
+                errors.append(f"'score' {score_val} outside allowed range [0, {max_score}]")
 
     # reasoning field
     if "reasoning" not in parsed or not isinstance(parsed["reasoning"], str):
@@ -97,12 +98,31 @@ def validate_grading_response(
                 continue
             if cs < 0 or cs > cmx:
                 errors.append(f"Criterion '{cid}' score {cs} outside [0, {cmx}]")
+            # The AI echoing its own per-criterion max is fine, but it must
+            # never EXCEED the rubric's declared max (a hallucination symptom:
+            # a bigger max quietly legitimizes inflated scores).
+            if cmx is not None and c.get("max_score") is not None:
+                try:
+                    declared = float(c["max_score"])
+                except (TypeError, ValueError):
+                    declared = None
+                if declared is not None and declared > cmx + 1e-9:
+                    errors.append(
+                        f"Criterion '{cid}' declares max_score {declared} exceeding the rubric's {cmx}"
+                    )
             crit_sum += cs
         missing = expected_ids - seen_ids
         if missing:
             errors.append(f"Rubric criteria missing from response: {sorted(missing)}")
         if crit_sum > max_score + 1e-9:
             errors.append(f"Sum of criteria scores {crit_sum} exceeds total max_score {max_score}")
+        # Consistency: the headline score MUST be the sum of the criteria.
+        # Without this check a model could report a generous "score" that its
+        # own per-criterion marks do not add up to, and it would pass as valid.
+        if score_val is not None and abs(score_val - crit_sum) > 0.05:
+            errors.append(
+                f"Total 'score' {score_val} does not match the sum of criteria scores {crit_sum}"
+            )
 
     # confidence
     if "confidence" in parsed and parsed["confidence"] is not None:
