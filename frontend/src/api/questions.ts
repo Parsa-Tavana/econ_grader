@@ -20,7 +20,7 @@ export async function createQuestion(req: CreateQuestionRequest): Promise<Questi
 }
 export async function updateQuestion(
   id: string,
-  req: Partial<Pick<CreateQuestionRequest, "text" | "maxScore" | "rubricText">>
+  req: Partial<Pick<CreateQuestionRequest, "text" | "maxScore">>
 ): Promise<QuestionDto> {
   const { data } = await api.put<QuestionDto>(`/questions/${id}`, req);
   return data;
@@ -61,20 +61,4 @@ export function questionFileUrl(questionId: string): string {
 }
 export async function deleteQuestionFile(questionId: string): Promise<void> {
   await api.delete(`/questions/${questionId}/file`);
-}
-
-export async function uploadRubricFile(questionId: string, file: File): Promise<FileMetaDto> {
-  const form = new FormData();
-  form.append("file", file);
-  const { data } = await api.post<FileMetaDto>(`/questions/${questionId}/rubric/file`, form, {
-    headers: { "Content-Type": "multipart/form-data" },
-  });
-  return data;
-}
-/** Authenticated stream URL — pass to fetchAuthenticatedFile, never <a href>. */
-export function rubricFileUrl(questionId: string): string {
-  return `/questions/${questionId}/rubric/file`;
-}
-export async function deleteRubricFile(questionId: string): Promise<void> {
-  await api.delete(`/questions/${questionId}/rubric/file`);
 }

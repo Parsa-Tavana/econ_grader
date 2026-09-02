@@ -61,7 +61,7 @@ const en = {
   },
   files: {
     questionLabel: "Question paper",
-    rubricLabel: "Rubric document",
+    examRubricLabel: "Exam rubric (grading key)",
     answerLabel: "Student answer",
     upload: "Upload file",
     replace: "Replace",
@@ -115,6 +115,30 @@ const en = {
       "Deleting an exam also deletes all its questions and answers.",
     questionCountLabel: "{{count}} questions",
     progressLabel: "{{percent}}% graded",
+    rubricFileTitle: "Exam rubric (grading key)",
+    rubricFileHint:
+      "Optional: the AI reads this single grading key to extract every question and its rubric at once.",
+    rubricFileHintLong:
+      "The AI extracts all questions and rubrics from this file. Grading itself uses the saved rubric below each question — this file is only the extraction source.",
+    extractQuestions: "Extract questions",
+    extractHint: "Extract questions and rubrics from the exam rubric file with AI.",
+  },
+  extraction: {
+    title: "AI rubric extraction",
+    subtitle:
+      "Review the extracted questions and criteria, edit freely, then apply. Matching question numbers are updated; new ones are added.",
+    running: "Reading the grading key… this can take a couple of minutes.",
+    emptyResult: "The AI could not extract any questions — check the file and try again.",
+    warnings: "Extraction warnings",
+    apply: "Save {{count}} questions",
+    removeQuestion: "Remove question",
+    confirmOverwriteTitle: "Update existing questions?",
+    confirmOverwrite:
+      "{{updates}} existing question(s) will be updated and {{creates}} new one(s) created. Existing answers and grading history are preserved.",
+    duplicateNumber: "Another row uses this question number",
+    sumExceedsMax: "Criteria sum ({{sum}}) exceeds the question max score ({{max}})",
+    invalidRow: "Some rows are invalid — fix the highlighted rows before saving.",
+    applied: "{{created}} question(s) created, {{updated}} updated.",
   },
   questions: {
     title: "Exam questions",
@@ -171,6 +195,7 @@ const en = {
     totalMaxScore: "Sum of criteria",
     versionCreated: "New rubric version saved",
     activeBadge: "Active",
+    workspaceHint: "Saving creates a new version; the next AI grading run uses it.",
   },
   students: {
     title: "Students",
@@ -354,6 +379,7 @@ const en = {
     runs: "Number of runs",
     estimatedCostNote:
       "Cost is computed after the run from actual token usage.",
+    usesSavedRubric: "Grading uses the saved rubric for this question — no files are uploaded at grading time.",
     startGrading: "Start grading",
     progressLabel: "Grading in progress...",
     completed: "Grading completed",

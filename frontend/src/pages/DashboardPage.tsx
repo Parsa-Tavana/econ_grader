@@ -63,11 +63,11 @@ export default function DashboardPage() {
         <Stat label={t("dashboard.aiGradedCount")} value={formatNumber(ev?.count ?? null, lang)} />
         <Stat
           label={t("dashboard.agreementRate")}
-          value={ev ? `${formatNumber(ev.exactAgreementPct, lang, { maximumFractionDigits: 1 })}٪` : "—"}
-          tone={ev && ev.exactAgreementPct >= 70 ? "good" : "warn"}
-          sub={`±0.5: ${ev ? formatNumber(ev.withinHalfPct, lang, { maximumFractionDigits: 1 }) : "—"}٪`}
+          value={ev && ev.count > 0 ? `${formatNumber(ev.exactAgreementPct, lang, { maximumFractionDigits: 1 })}٪` : "—"}
+          tone={ev && ev.count > 0 && ev.exactAgreementPct >= 70 ? "good" : "warn"}
+          sub={`±0.5: ${ev && ev.count > 0 ? formatNumber(ev.withinHalfPct, lang, { maximumFractionDigits: 1 }) : "—"}٪`}
         />
-        <Stat label={t("dashboard.mae")} value={ev ? formatScore(ev.mae, lang) : "—"} tone={ev && ev.mae <= 1 ? "good" : "warn"} />
+        <Stat label={t("dashboard.mae")} value={ev && ev.count > 0 ? formatScore(ev.mae, lang) : "—"} tone={ev && ev.count > 0 && ev.mae <= 1 ? "good" : "warn"} />
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">

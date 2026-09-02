@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plus, Trash2, Edit2, ChevronDown } from "lucide-react";
-import { listExams, createExam, updateExam, deleteExam } from "../api/exams";
+import { listExams, createExam, updateExam, deleteExam, uploadExamRubricFile } from "../api/exams";
 import {
   PageHeader,
   Card,
@@ -19,6 +19,7 @@ import {
   ConfirmDialog,
   friendlyError,
 } from "../components/ui";
+import { ACCEPTED_TYPES } from "../components/FileAttachment";
 import { formatNumber, timeAgo } from "../utils/format";
 import { currentLang } from "../hooks/useLang";
 import { useToast } from "../hooks/useToast";
@@ -29,12 +30,14 @@ interface ExamForm {
   name: string;
   year: number;
   description: string;
+  rubricFile: File | null;
 }
 
 const emptyForm = (): ExamForm => ({
   name: "",
   year: new Date().getFullYear(),
   description: "",
+  rubricFile: null,
 });
 
 export default function ExamsPage() {
@@ -42,6 +45,7 @@ export default function ExamsPage() {
   const lang = currentLang();
   const qc = useQueryClient();
   const toast = useToast();
+  const navigate = useNavigate();
   // Exam create/edit/delete are Teacher-only server-side — hide the controls.
   const canManage = hasRole(getAuthUser(), "Teacher");
 
@@ -55,16 +59,22 @@ export default function ExamsPage() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ["exams"] });
 
   const createMut = useMutation({
-    mutationFn: () =>
-      createExam({
+    // Create, then (optionally) upload the exam-wide rubric file, then land on
+    // the exam page — with ?extract=1 the extraction preview auto-opens.
+    mutationFn: async () => {
+      const exam = await createExam({
         name: form.name.trim(),
         year: form.year,
         description: form.description.trim() || null,
-      }),
-    onSuccess: () => {
+      });
+      if (form.rubricFile) await uploadExamRubricFile(exam.id, form.rubricFile);
+      return exam;
+    },
+    onSuccess: (exam) => {
       invalidate();
       closeDialog();
       toast.success(t("states.reviewSaved"));
+      navigate(`/exams/${exam.id}${form.rubricFile ? "?extract=1" : ""}`);
     },
     onError: (e) => toast.error(friendlyError(e, t)),
   });
@@ -103,7 +113,12 @@ export default function ExamsPage() {
   function openEdit(id: string) {
     const e = examsQ.data?.find((x) => x.id === id);
     if (!e) return;
-    setForm({ name: e.name, year: e.year, description: e.description ?? "" });
+    setForm({
+      name: e.name,
+      year: e.year,
+      description: e.description ?? "",
+      rubricFile: null,
+    });
     setEditingId(id);
     setShowCreate(true);
   }
@@ -221,6 +236,20 @@ export default function ExamsPage() {
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
               />
             </Field>
+            {!editingId ? (
+              <Field
+                label={`${t("files.examRubricLabel")} (${t("common.optional")})`}
+                hint={t("exams.rubricFileHint")}
+                htmlFor="exam-rubric-file"
+              >
+                <Input
+                  id="exam-rubric-file"
+                  type="file"
+                  accept={ACCEPTED_TYPES}
+                  onChange={(e) => setForm({ ...form, rubricFile: e.target.files?.[0] ?? null })}
+                />
+              </Field>
+            ) : null}
           </div>
           <div className="mt-5 flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={closeDialog}>

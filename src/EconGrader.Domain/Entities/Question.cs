@@ -8,7 +8,6 @@ public class Question
     public int Number { get; set; }
     public string Text { get; set; } = null!;
     public decimal MaxScore { get; set; }
-    public string? RubricText { get; set; }
     public int DisplayOrder { get; set; }
     /// <summary>Optional stored file (PDF/PNG/JPG/DOCX) of the question paper.</summary>
     public string? FileStorageKey { get; set; }

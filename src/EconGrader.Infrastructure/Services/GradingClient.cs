@@ -23,6 +23,7 @@ public sealed class GradingClient : IGradingClient
     private readonly HttpClient _http;
     private readonly ILogger<GradingClient> _logger;
     private readonly JsonSerializerOptions _json;
+    private readonly JsonSerializerOptions _extractJson;
 
     public GradingClient(HttpClient http, ILogger<GradingClient> logger, Microsoft.Extensions.Options.IOptions<GradingServiceOptions> options)
     {
@@ -36,6 +37,9 @@ public sealed class GradingClient : IGradingClient
         // Python service speaks snake_case (pydantic models without aliases) —
         // bind ai_score/is_valid/... onto our PascalCase records.
         _json = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
+        // Extraction responses bind via explicit JsonPropertyName attributes
+        // (short keys like "id" that SnakeCaseLower would mangle).
+        _extractJson = new JsonSerializerOptions();
     }
 
     public async Task<GradingServiceResponse> GradeAsync(GradingServiceRequest request, CancellationToken ct = default)
@@ -48,7 +52,6 @@ public sealed class GradingClient : IGradingClient
             rubric = new { criteria = request.Rubric.Criteria.Select(c => new { id = c.Id, description = c.Description, max_score = c.MaxScore }) },
             answer_image_paths = request.AnswerImagePaths,
             question_image_paths = request.QuestionImagePaths,
-            rubric_file_paths = request.RubricFilePaths ?? Array.Empty<string>(),
             max_score = request.MaxScore,
             temperature = request.Temperature,
             prompt_version = request.PromptVersion,
@@ -69,6 +72,36 @@ public sealed class GradingClient : IGradingClient
         var parsed = JsonSerializer.Deserialize<GradingServiceResponse>(body, _json);
         if (parsed is null)
             throw new DependencyException("GradingService", "Failed to deserialize grading response");
+        return parsed;
+    }
+
+    public async Task<ExtractionServiceResponse> ExtractAsync(string absoluteFilePath, string fileName, CancellationToken ct = default)
+    {
+        // The extraction contract uses short snake_case keys (id, max_score) —
+        // deserialize with explicit attribute mappings, not the global naming
+        // policy (which would expect criterion_id and mangle the binding).
+        var payload = new
+        {
+            file_paths = new[] { absoluteFilePath },
+            document_name = fileName,
+            temperature = 0.0,
+            prompt_version = "extract",
+        };
+
+        _logger.LogInformation("Sending extraction request for rubric document {FileName}", fileName);
+
+        var resp = await _http.PostAsJsonAsync("/extract", payload, _json, ct);
+        var body = await resp.Content.ReadAsStringAsync(ct);
+
+        if (!resp.IsSuccessStatusCode)
+        {
+            _logger.LogError("Extraction service returned {Status}: {Body}", resp.StatusCode, body);
+            throw new HttpRequestException($"Grading service extraction error {resp.StatusCode}: {body}");
+        }
+
+        var parsed = JsonSerializer.Deserialize<ExtractionServiceResponse>(body, _extractJson);
+        if (parsed is null)
+            throw new DependencyException("GradingService", "Failed to deserialize extraction response");
         return parsed;
     }
 

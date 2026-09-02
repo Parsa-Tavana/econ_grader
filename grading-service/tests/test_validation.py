@@ -83,42 +83,9 @@ class TestValidation:
         is_valid, _ = validate_grading_response(parsed, "", 5.0, RUBRIC)
         assert not is_valid
 
-    def test_doc_only_rubric_accepts_unlisted_criteria(self):
-        # Rubric criteria live in an attached document — no structured rows.
-        empty_rubric = {"criteria": []}
-        parsed = {
-            "score": 4,
-            "reasoning": "Graded against the spreadsheet rubric",
-            "criteria_scores": [
-                {"id": "sheet-row-1", "score": 2, "max_score": 2},
-                {"id": "sheet-row-2", "score": 2, "max_score": 3},
-            ],
-            "confidence": 0.8,
-        }
-        is_valid, errors = validate_grading_response(
-            parsed, "", 5.0, empty_rubric, allow_unlisted_criteria=True
-        )
-        assert is_valid
-        assert errors == []
-
-    def test_doc_only_rubric_still_rejects_oversum(self):
-        empty_rubric = {"criteria": []}
-        parsed = {
-            "score": 6,
-            "reasoning": "x",
-            "criteria_scores": [
-                {"id": "q1", "score": 3},
-                {"id": "q2", "score": 4},
-            ],
-        }
-        is_valid, errors = validate_grading_response(
-            parsed, "", 5.0, empty_rubric, allow_unlisted_criteria=True
-        )
-        assert not is_valid
-        assert any("exceeds total max_score" in e for e in errors)
-
-    def test_doc_only_rubric_rejects_unlisted_without_flag(self):
-        # Without the flag, unknown criteria are still rejected (safety default).
+    def test_unlisted_criteria_always_rejected(self):
+        # Rubrics always arrive as structured rows from the DB — criterion ids
+        # not defined there are rejected unconditionally.
         empty_rubric = {"criteria": []}
         parsed = {
             "score": 4,

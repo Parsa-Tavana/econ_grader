@@ -1,0 +1,46 @@
+You are extracting exam questions and their grading rubrics from an official grading-key document.
+
+The document you receive is the authoritative grading key for ONE exam: it lists
+every question with its marks and the credit components for each question.
+
+Rules — apply ALL of them:
+- Copy all question text and criterion descriptions VERBATIM, in the document's
+  original language. Persian text stays Persian; NEVER translate or transliterate.
+- For EACH question output:
+  - "number": the question number exactly as printed (integer).
+  - "text": the complete question statement, verbatim.
+  - "max_score": the total marks printed for that question (number).
+  - "criteria": every component that can independently earn marks, in document
+    order, each with:
+    - "id": the component's own label from the document (e.g. "الف", "1a", "ب-1").
+      If the document shows no label, invent a short stable label (a, b, c, ...).
+    - "description": what earns the marks, verbatim from the document.
+    - "max_score": the marks for this component (number).
+- If a question shows a total but NO component breakdown, emit EXACTLY ONE
+  criterion: its description summarizes the full credit requirement and its
+  max_score equals the question total. The criteria array must NEVER be empty.
+- Preserve the document's question and criterion order. Do NOT merge two
+  questions into one and do NOT split one question into several.
+- Skip cover-page text, general instructions, student-facing instructions and
+  headers/footers — they are not questions.
+- Every "max_score" must be a positive number.
+
+Extracted text of the document (may be empty for scanned pages — rely on the
+images in that case):
+{document_text}
+
+Document: {document_name} ({document_pages} page(s) shown as images)
+
+Return ONLY valid JSON (no markdown fences, no extra text) with exactly this schema:
+{{
+  "questions": [
+    {{
+      "number": <integer>,
+      "text": "<full question statement, verbatim>",
+      "max_score": <number>,
+      "criteria": [
+        {{ "id": "<criterion label>", "description": "<what earns the marks, verbatim>", "max_score": <number> }}
+      ]
+    }}
+  ]
+}}

@@ -209,16 +209,15 @@ if (-not $SkipSeed) {
         $question = @($qs.Body) | Where-Object { $_.number -eq 1 } | Select-Object -First 1
         if (-not $question) {
             $qtext = "SMOKE TEST: Explain, in two or three sentences, how a central bank raising its policy rate typically affects consumer price inflation."
-            $rubric = "1) Mentions higher borrowing costs reducing demand (4 pts). 2) Links weaker demand to slower inflation (4 pts). 3) Coherent economic reasoning (2 pts)."
             $question = (Invoke-Api -Method Post -Path "/api/questions" -Token $ttoken -Body @{
-                examId = $examId; number = 1; text = $qtext; maxScore = 10; rubricText = $rubric
+                examId = $examId; number = 1; text = $qtext; maxScore = 10
             }).Body
         }
         $questionId = $question.id
         Pass "demo-question" "maxScore=10"
 
-        # Active rubric with criteria — REQUIRED for grading (the orchestrator
-        # 404s without one; rubricText alone is not enough).
+        # Active rubric with criteria — REQUIRED for grading (grading uses saved
+        # structured criteria only; no rubric file or text is sent at grading time).
         $rubricBody = @{
             criteria = @(
                 @{ criterionId = "R1"; description = "Mentions higher borrowing costs reducing demand"; maxScore = 4 }

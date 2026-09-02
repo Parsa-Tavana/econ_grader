@@ -144,5 +144,7 @@ public record EvaluationResultDto(
     Dictionary<decimal, Dictionary<decimal, int>> ScoreDistribution)
 {
     public static EvaluationResultDto Empty(Guid id) =>
-        new(id, 0, double.NaN, double.NaN, 0, 0, 0, 0, null, null, new());
+        // Mae/Rmse must be finite (0) — double.NaN fails JSON serialization and
+        // turned "exam with no graded runs yet" into a 400 VALIDATION_ERROR.
+        new(id, 0, 0, 0, 0, 0, 0, 0, null, null, new());
 }

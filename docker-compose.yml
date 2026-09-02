@@ -78,6 +78,11 @@ services:
       # the JSON never starts and the run fails with raw_len=0 (observed live).
       # 8192 covers reasoning + full grading JSON for multi-page PDF answers.
       - DEFAULT_MAX_TOKENS=8192
+      # Exam-rubric extraction (POST /extract): the whole grading key comes
+      # back as ONE JSON document, so it needs a much larger output budget
+      # than a single grading run.
+      - EXTRACTION_MAX_TOKENS=16384
+      - EXTRACT_MAX_PAGES=20
       # MUST match FileStorage__RootPath of the api service below:
       # the API sends absolute image paths to Python, so both containers
       # need the identical shared volume mounted at the same path.

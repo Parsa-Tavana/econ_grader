@@ -21,8 +21,12 @@ from fastapi.responses import JSONResponse
 from .config import settings
 from .graders.factory import get_grader
 from .graders.base import ERROR_KIND_PARSE, ERROR_KIND_TIMEOUT
-from .schemas import GradeRequest, GradeResponse, CriterionOut, HealthResponse, EvaluationRequest
+from .schemas import (
+    GradeRequest, GradeResponse, CriterionOut, HealthResponse, EvaluationRequest,
+    ExtractionRequest, ExtractionResponse, ExtractedQuestionOut, ExtractedCriterionOut,
+)
 from .validation import validate_grading_response, parse_json_safe
+from .extraction_validation import validate_extraction
 from .attachments import prepare_attachments
 from .cost import estimate_cost
 from .prompts.loader import list_prompt_versions, load_prompt
@@ -191,7 +195,7 @@ async def grade(req: GradeRequest):
     provider = settings.MODEL_PROVIDER
 
     # Convert every attachment (PDF → page PNGs, DOCX → text, PNG/JPG → pass-through).
-    for p in [*req.answer_image_paths, *req.question_image_paths, *req.rubric_file_paths]:
+    for p in [*req.answer_image_paths, *req.question_image_paths]:
         if not Path(p).exists():
             raise HTTPException(status_code=422, detail={
                 "stage": "image_load",
@@ -200,7 +204,7 @@ async def grade(req: GradeRequest):
             })
 
     try:
-        prep = prepare_attachments(req.answer_image_paths, req.question_image_paths, req.rubric_file_paths)
+        prep = prepare_attachments(req.answer_image_paths, req.question_image_paths)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
@@ -214,9 +218,8 @@ async def grade(req: GradeRequest):
     # straight from the econgrader-grading logs in Dozzle.
     logger.info(
         '{"event":"attachments_prepared","answer_images":%d,"question_images":%d,'
-        '"rubric_images":%d,"answer_text_chars":%d,"rubric_text_chars":%d}'
-        % (len(prep.answer_images), len(prep.question_images), len(prep.rubric_images),
-           len(prep.extra_text), len(prep.rubric_extra_text))
+        '"answer_text_chars":%d}'
+        % (len(prep.answer_images), len(prep.question_images), len(prep.extra_text))
     )
 
     try:
@@ -225,15 +228,6 @@ async def grade(req: GradeRequest):
         raise HTTPException(status_code=422, detail=str(exc))
 
     rubric_dict = {"criteria": [c.model_dump() for c in req.rubric.criteria]}
-    # Excel/PDF/DOCX rubric with no structured criteria rows: the criteria come
-    # entirely from the attached document text the AI is shown. Such runs must
-    # accept criterion ids drawn from that document instead of requiring them
-    # to match structured rows.
-    doc_sourced_rubric = (
-        not req.rubric.criteria
-        and bool(prep.rubric_extra_text or prep.rubric_images)
-    )
-
     # The typed متن سؤال and the question paper's extracted text are ONE
     # question statement to the AI — either may be empty.
     combined_question_text = prep.combined_question_text(req.question_text)
@@ -248,9 +242,6 @@ async def grade(req: GradeRequest):
             temperature=req.temperature,
             prompt_version=req.prompt_version,
             extra_text=prep.extra_text,
-            rubric_text=prep.rubric_extra_text,
-            rubric_images=prep.rubric_images,
-            document_only_rubric=doc_sourced_rubric,
         )
 
     def _image_unreadable(result: GradingResult) -> bool:
@@ -299,7 +290,7 @@ async def grade(req: GradeRequest):
     if (
         result.error is None
         and (result.ai_score or 0) <= 0
-        and (prep.answer_images or prep.question_images or prep.rubric_images)
+        and (prep.answer_images or prep.question_images)
         and _image_unreadable(result)
     ):
         logger.warning('{"event":"image_unreadable_retry","provider":"%s","attempt":2}' % provider)
@@ -330,14 +321,13 @@ async def grade(req: GradeRequest):
                 parsed.setdefault("flagged_ambiguities", []).extend(repair_notes)
             is_valid, validation_errors = validate_grading_response(
                 parsed, result.raw_response, req.max_score, rubric_dict,
-                allow_unlisted_criteria=doc_sourced_rubric,
             )
 
     estimated_cost = estimate_cost(
         provider=provider.lower(),
         input_tokens=result.input_tokens,
         output_tokens=result.output_tokens,
-        num_images=len(prep.answer_images) + len(prep.question_images) + len(prep.rubric_images),
+        num_images=len(prep.answer_images) + len(prep.question_images),
     )
 
     resp = GradeResponse(
@@ -375,6 +365,132 @@ async def grade(req: GradeRequest):
     )
 
     _log_request_response(req.model_dump(), resp, result.raw_response, latency_ms)
+    return resp
+
+
+@app.post("/extract", response_model=ExtractionResponse, tags=["extraction"], dependencies=[Depends(require_internal_key)])
+async def extract(req: ExtractionRequest):
+    """Extract every question + its rubric criteria from ONE exam-wide rubric
+    document (the grading key). Saves nothing — the .NET layer shows the result
+    as an editable preview; only confirmed rows reach the database."""
+    t0 = time.time()
+    provider = settings.MODEL_PROVIDER
+
+    for p in req.file_paths:
+        if not Path(p).exists():
+            raise HTTPException(status_code=422, detail={
+                "stage": "image_load",
+                "file": p,
+                "error": "Rubric document file not found",
+            })
+
+    try:
+        prep = prepare_attachments([], [], req.file_paths)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    # Caps so a huge grading key can't blow the context window — anything
+    # beyond the limits is dropped and reported, never silently truncated.
+    warnings: list[str] = list(prep.warnings)
+    document_images = prep.rubric_images
+    if len(document_images) > settings.EXTRACT_MAX_PAGES:
+        warnings.append(
+            f"Document has {len(document_images)} pages; only the first {settings.EXTRACT_MAX_PAGES} were sent to the AI"
+        )
+        document_images = document_images[: settings.EXTRACT_MAX_PAGES]
+    document_text = prep.rubric_extra_text[: settings.EXTRACT_MAX_TEXT_CHARS]
+    if len(prep.rubric_extra_text) > settings.EXTRACT_MAX_TEXT_CHARS:
+        warnings.append(
+            f"Document text truncated to {settings.EXTRACT_MAX_TEXT_CHARS} characters"
+        )
+
+    try:
+        grader = get_grader()
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    def _invoke_extractor():
+        return grader.extract(
+            document_text=document_text,
+            document_images=document_images,
+            document_name=req.document_name or "rubric document",
+            temperature=req.temperature,
+            prompt_version=req.prompt_version,
+        )
+
+    result = _invoke_extractor()
+
+    # Same transient-retry contract as /grade: malformed JSON and upstream
+    # timeouts are retried once verbatim. Budget: one 280s timeout plus a fast
+    # parse retry stays inside the .NET side's 315s attempt window.
+    if getattr(result, "error_kind", None) in (ERROR_KIND_PARSE, ERROR_KIND_TIMEOUT):
+        logger.warning('{"event":"transient_retry","provider":"%s","kind":"%s","attempt":2,"stage":"extraction"}'
+                       % (provider, result.error_kind))
+        result = _invoke_extractor()
+
+    latency_ms = result.latency_ms or int((time.time() - t0) * 1000)
+
+    is_valid, validation_errors = False, [result.error] if result.error else []
+    parsed = result.parsed
+    questions: list[ExtractedQuestionOut] = []
+
+    if result.error:
+        is_valid = False
+        validation_errors = [result.error]
+    else:
+        if parsed is None:
+            parsed, parse_err = parse_json_safe(result.raw_response)
+        else:
+            parse_err = None
+        if parse_err:
+            is_valid = False
+            validation_errors = [parse_err]
+        else:
+            is_valid, validation_errors, rows, extract_warnings = validate_extraction(parsed, result.raw_response)
+            warnings.extend(extract_warnings)
+            questions = [
+                ExtractedQuestionOut(
+                    number=row["number"],
+                    text=row["text"],
+                    max_score=row["max_score"],
+                    criteria=[ExtractedCriterionOut(**c) for c in row["criteria"]],
+                )
+                for row in rows
+            ]
+
+    estimated_cost = estimate_cost(
+        provider=provider.lower(),
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        num_images=len(document_images),
+    )
+
+    resp = ExtractionResponse(
+        provider=result.provider,
+        model_name=result.model_name,
+        model_version=result.model_version,
+        prompt_version=result.prompt_version,
+        questions=questions,
+        warnings=warnings,
+        is_valid=is_valid and result.error is None,
+        validation_errors=[e for e in validation_errors if e],
+        raw_response=result.raw_response,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        latency_ms=latency_ms,
+        estimated_cost_usd=estimated_cost,
+        error=result.error,
+    )
+
+    logger.info(
+        '{"event":"extraction","provider":"%s","model":"%s","prompt_version":"%s",'
+        '"pages":%d,"text_chars":%d,"questions":%d,"is_valid":%s,"latency_ms":%d,'
+        '"input_tokens":%d,"output_tokens":%d,"cost_usd":%.6f,"error":%s}'
+        % (result.provider, result.model_name, result.prompt_version,
+           len(document_images), len(document_text), len(questions), is_valid, latency_ms,
+           result.input_tokens, result.output_tokens, estimated_cost,
+           json.dumps(result.error))
+    )
     return resp
 
 

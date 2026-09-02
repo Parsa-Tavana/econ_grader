@@ -70,5 +70,7 @@ public sealed class ExamService : IExamService
         return true;
     }
 
-    private static ExamDto Map(Exam e) => new(e.Id, e.Name, e.Year, e.Description, e.CreatedAt, e.CreatedBy?.DisplayName ?? "unknown");
+    private static ExamDto Map(Exam e) => new(
+        e.Id, e.Name, e.Year, e.Description, e.CreatedAt, e.CreatedBy?.DisplayName ?? "unknown",
+        RubricFileName: e.RubricFileName, RubricFileContentType: e.RubricFileContentType);
 }

@@ -29,7 +29,20 @@ class Settings(BaseSettings):
     # Default grading parameters
     DEFAULT_TEMPERATURE: float = 0.0
     DEFAULT_MAX_TOKENS: int = 2048
-    
+
+    # Exam-rubric extraction (/extract): a whole grading key must come back as
+    # ONE JSON document, so it needs a much larger token budget than a single
+    # grading run. Timeout must stay below the .NET side's 315s attempt window
+    # (worst case: this timeout + one verbatim retry would exceed it — the
+    # endpoint retries only parse/timeout-tagged failures, and one 280s timeout
+    # plus a fast parse-failure retry still fits).
+    EXTRACTION_MAX_TOKENS: int = 16384
+    EXTRACTION_TIMEOUT_SECONDS: float = 280.0
+    # Caps so a 200-page grading key can't blow the context window; anything
+    # beyond is dropped with an explicit warning in the response.
+    EXTRACT_MAX_PAGES: int = 20
+    EXTRACT_MAX_TEXT_CHARS: int = 150_000
+
     # Storage
     IMAGE_STORAGE_ROOT: str = Field(default="storage/images")
     PROMPTS_DIR: str = Field(default="app/prompts")

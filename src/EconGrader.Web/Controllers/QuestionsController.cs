@@ -65,7 +65,7 @@ public sealed class QuestionsController : ControllerBase
         CancellationToken ct)
     {
         if (!await _scope.CanAccessQuestionAsync(_user, id, writeAccess: true, ct)) return Forbid();
-        return await _svc.UpdateAsync(id, request.Text, request.MaxScore, request.RubricText, ct) is { } dto ? Ok(dto) : NotFound();
+        return await _svc.UpdateAsync(id, request.Text, request.MaxScore, ct) is { } dto ? Ok(dto) : NotFound();
     }
 
     [HttpDelete("{id:guid}")]
@@ -169,110 +169,6 @@ public sealed class QuestionsController : ControllerBase
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }
-
-    // ── Rubric document (attaches to the ACTIVE rubric version) ─────────────
-
-    /// <summary>
-    /// Upload/replace the rubric document (PDF/PNG/JPG/DOCX/XLSX/XLS, ≤20 MB).
-    /// If the question has no active rubric version yet, one is created
-    /// automatically so a document-only rubric can be uploaded standalone.
-    /// </summary>
-    [HttpPost("{id:guid}/rubric/file")]
-    [Authorize(Roles = nameof(UserRole.Teacher))]
-    [RequestSizeLimit(FileUploadValidator.MaxBytes)]
-    public async Task<IActionResult> UploadRubricFile(Guid id, IFormFile file, CancellationToken ct)
-    {
-        if (!await _scope.CanAccessQuestionAsync(_user, id, writeAccess: true, ct)) return Forbid();
-        if (file.Length == 0) return BadRequest(new { code = "EMPTY_FILE", message = "Empty file" });
-        var ext = FileUploadValidator.ExtensionForFile(file.ContentType, file.FileName);
-        if (ext is null)
-            return StatusCode(415, new { code = "UNSUPPORTED_MEDIA_TYPE", message = $"Unsupported file type '{file.ContentType}' — use {FileUploadValidator.AcceptedTypesDisplay}" });
-
-        var questionExists = await _db.Questions.AnyAsync(q => q.Id == id, ct);
-        if (!questionExists) return NotFound();
-
-        // Attach to the active rubric; auto-create one when the teacher uploads
-        // a document before defining criteria (fixes NO_ACTIVE_RUBRIC 404s).
-        var createdByUserId = _user.UserId;
-
-        var rubric = await _db.Rubrics.FirstOrDefaultAsync(r => r.QuestionId == id && r.IsActive, ct);
-        bool createdRubric = false;
-        if (rubric is null)
-        {
-            var maxVersion = await _db.Rubrics
-                .Where(r => r.QuestionId == id)
-                .MaxAsync(r => (int?)r.Version, ct) ?? 0;
-
-            rubric = new Rubric
-            {
-                QuestionId = id,
-                Version = maxVersion + 1,
-                IsActive = true,
-                CreatedByUserId = createdByUserId,
-            };
-            _db.Rubrics.Add(rubric);
-            createdRubric = true;
-        }
-
-        if (!string.IsNullOrEmpty(rubric.FileStorageKey))
-        {
-            try { await _storage.DeleteAsync(rubric.FileStorageKey, ct); }
-            catch (IOException ex) { _logger.LogWarning(ex, "Could not delete previous rubric file {Key}", rubric.FileStorageKey); }
-        }
-
-        var key = $"rubrics/{id:N}/{Guid.NewGuid():N}{ext}";
-        await using var stream = file.OpenReadStream();
-        await _storage.SaveAsync(stream, key, ct);
-
-        rubric.FileStorageKey = key;
-        rubric.FileName = Path.GetFileName(file.FileName);
-        rubric.ContentType = file.ContentType;
-        await _db.SaveChangesAsync(ct);
-
-        if (createdRubric)
-            await _audit.WriteAsync("RubricCreated", "Rubric", rubric.Id,
-                createdByUserId == Guid.Empty ? null : createdByUserId,
-                new { QuestionId = id, rubric.Version, Source = "RubricFileUpload" }, cancellationToken: ct);
-
-        _logger.LogInformation(
-            "Rubric file uploaded QuestionId={QuestionId} RubricId={RubricId} CreatedNewRubric={CreatedNewRubric} {FileName}",
-            id, rubric.Id, createdRubric, rubric.FileName);
-        return Ok(new { fileStorageKey = key, fileName = rubric.FileName, contentType = rubric.ContentType });
-    }
-
-    /// <summary>Download/stream the active rubric document.</summary>
-    [HttpGet("{id:guid}/rubric/file")]
-    public async Task<IActionResult> DownloadRubricFile(Guid id, CancellationToken ct)
-    {
-        if (!await _scope.CanAccessQuestionAsync(_user, id, writeAccess: false, ct)) return Forbid();
-        var rubric = await _db.Rubrics.FirstOrDefaultAsync(r => r.QuestionId == id && r.IsActive, ct);
-        if (rubric is null || string.IsNullOrEmpty(rubric.FileStorageKey)) return NotFound();
-
-        var stream = await _storage.OpenReadAsync(rubric.FileStorageKey, ct);
-        if (stream is null) return NotFound();
-
-        return File(stream, rubric.ContentType ?? "application/octet-stream", rubric.FileName ?? $"rubric-{id}");
-    }
-
-    /// <summary>Remove the active rubric document.</summary>
-    [HttpDelete("{id:guid}/rubric/file")]
-    [Authorize(Roles = nameof(UserRole.Teacher))]
-    public async Task<IActionResult> DeleteRubricFile(Guid id, CancellationToken ct)
-    {
-        if (!await _scope.CanAccessQuestionAsync(_user, id, writeAccess: true, ct)) return Forbid();
-        var rubric = await _db.Rubrics.FirstOrDefaultAsync(r => r.QuestionId == id && r.IsActive, ct);
-        if (rubric is null) return NotFound();
-        if (string.IsNullOrEmpty(rubric.FileStorageKey)) return NoContent();
-
-        try { await _storage.DeleteAsync(rubric.FileStorageKey, ct); }
-        catch (IOException ex) { _logger.LogWarning(ex, "Could not delete rubric file {Key}", rubric.FileStorageKey); }
-
-        rubric.FileStorageKey = null;
-        rubric.FileName = null;
-        rubric.ContentType = null;
-        await _db.SaveChangesAsync(ct);
-        return NoContent();
-    }
 }
 
-public record UpdateQuestionRequest(string? Text, decimal? MaxScore, string? RubricText);
+public record UpdateQuestionRequest(string? Text, decimal? MaxScore);

@@ -13,7 +13,8 @@ correctly:
   - answer   → student answer images + typed-answer document text
   - question → question paper images; document text merges into the question
                statement alongside the typed question text
-  - rubric   → rubric document images + text, shown beside the structured rubric
+  - rubric   → exam-wide rubric document images + text, consumed by the
+               /extract endpoint (grading no longer takes rubric files)
 
 Conversion failures raise — they are surfaced as validation errors on the run,
 never silently skipped.

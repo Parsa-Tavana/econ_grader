@@ -1,7 +1,6 @@
-import { clsx } from "clsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   Plus,
@@ -10,29 +9,32 @@ import {
   ArrowLeft,
   Upload,
   Layers,
+  Sparkles,
 } from "lucide-react";
-import type { QuestionDto } from "../types/models";
-import { getExam } from "../api/exams";
+import type { ApplyExtractionQuestion, QuestionDto } from "../types/models";
+import {
+  getExam,
+  uploadExamRubricFile,
+  deleteExamRubricFile,
+  extractExamQuestions,
+  applyExtraction,
+  examRubricFileUrl,
+} from "../api/exams";
 import {
   listQuestionsByExam,
   createQuestion,
   updateQuestion,
   deleteQuestion,
   getActiveRubric,
-  createRubric,
-} from "../api/questions";
-import { listAnswersByQuestion } from "../api/answers";
-import { uploadAnswer } from "../api/answers";
-import {
   uploadQuestionFile,
   deleteQuestionFile,
   questionFileUrl,
-  uploadRubricFile,
-  deleteRubricFile,
-  rubricFileUrl,
 } from "../api/questions";
-import { FileAttachment } from "../components/FileAttachment";
+import { listAnswersByQuestion, uploadAnswer } from "../api/answers";
 import { listStudents, createStudent } from "../api/students";
+import { apiErrorMessage } from "../api/client";
+import { FileAttachment } from "../components/FileAttachment";
+import { ExtractionPreviewDialog } from "../components/ExtractionPreviewDialog";
 import {
   PageHeader,
   Card,
@@ -53,23 +55,16 @@ import { useToast } from "../hooks/useToast";
 import { getAuthUser } from "../api/auth";
 import { hasRole } from "../utils/roles";
 
-interface RubricCriterionInput {
-  description: string;
-  maxScore: number;
-}
-
 interface QuestionForm {
   number: number;
   text: string;
   maxScore: number;
-  rubricText: string;
 }
 
 const emptyQuestion = (): QuestionForm => ({
   number: 1,
   text: "",
   maxScore: 20,
-  rubricText: "",
 });
 
 export default function ExamDetailPage() {
@@ -91,9 +86,57 @@ export default function ExamDetailPage() {
   const [editingQId, setEditingQId] = useState<string | null>(null);
   const [qForm, setQForm] = useState<QuestionForm>(emptyQuestion());
 
-  // rubric dialog state
-  const [rubricQ, setRubricQ] = useState<QuestionDto | null>(null);
-  const [criteria, setCriteria] = useState<RubricCriterionInput[]>([]);
+  // extraction preview dialog state
+  const [extractionOpen, setExtractionOpen] = useState(false);
+  const [extractionError, setExtractionError] = useState<string | null>(null);
+  const extractMut = useMutation({
+    // The AI call runs server-side (POST /extraction/preview); nothing is
+    // saved until the user confirms rows in the preview (POST /apply).
+    mutationFn: () => extractExamQuestions(examId),
+    onSuccess: () => setExtractionError(null),
+    onError: (e) => setExtractionError(friendlyError(apiErrorMessage(e), t)),
+  });
+  const applyMut = useMutation({
+    mutationFn: (questions: ApplyExtractionQuestion[]) => applyExtraction(examId, questions),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ["questions", examId] });
+      qc.invalidateQueries({ queryKey: ["exam", examId] });
+      setExtractionOpen(false);
+      toast.success(
+        t("extraction.applied", {
+          created: result.createdQuestions,
+          updated: result.updatedQuestions,
+        })
+      );
+    },
+    onError: (e) => toast.error(friendlyError(apiErrorMessage(e), t)),
+  });
+
+  function runExtraction() {
+    // Drop any previous preview so the dialog shows the spinner, not stale rows.
+    extractMut.reset();
+    setExtractionOpen(true);
+    setExtractionError(null);
+    extractMut.mutate();
+  }
+
+  // Creating an exam with a rubric file lands here with ?extract=1 — auto-open
+  // the preview once. The ref guard survives StrictMode double-mount.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const autoExtractFired = useRef(false);
+  useEffect(() => {
+    if (
+      !autoExtractFired.current &&
+      canManage &&
+      searchParams.get("extract") === "1" &&
+      examQ.data?.rubricFileName
+    ) {
+      autoExtractFired.current = true;
+      setSearchParams({}, { replace: true });
+      runExtraction();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canManage, searchParams, examQ.data?.rubricFileName]);
 
   function openCreateQuestion() {
     setQForm({ ...emptyQuestion(), number: (questionsQ.data?.length ?? 0) + 1 });
@@ -102,21 +145,9 @@ export default function ExamDetailPage() {
   }
 
   function openEditQuestion(q: QuestionDto) {
-    setQForm({ number: q.number, text: q.text, maxScore: q.maxScore, rubricText: q.rubricText ?? "" });
+    setQForm({ number: q.number, text: q.text, maxScore: q.maxScore });
     setEditingQId(q.id);
     setQDialogOpen(true);
-  }
-
-  async function openRubric(q: QuestionDto) {
-    setRubricQ(q);
-    try {
-      const r = await getActiveRubric(q.id);
-      setCriteria(
-        r?.criteria.map((c) => ({ description: c.description, maxScore: c.maxScore })) ?? []
-      );
-    } catch {
-      setCriteria([]);
-    }
   }
 
   const saveQuestionMut = useMutation({
@@ -125,7 +156,6 @@ export default function ExamDetailPage() {
         await updateQuestion(editingQId, {
           text: qForm.text.trim(),
           maxScore: qForm.maxScore,
-          rubricText: qForm.rubricText || null,
         });
       } else {
         await createQuestion({
@@ -133,7 +163,6 @@ export default function ExamDetailPage() {
           number: qForm.number,
           text: qForm.text.trim(),
           maxScore: qForm.maxScore,
-          rubricText: qForm.rubricText || null,
         });
       }
     },
@@ -151,36 +180,26 @@ export default function ExamDetailPage() {
     onError: (e) => toast.error(friendlyError(e, t)),
   });
 
-  const saveRubricMut = useMutation({
-    mutationFn: () =>
-      createRubric({
-        questionId: rubricQ!.id,
-        criteria: criteria
-          .filter((c) => c.description.trim())
-          .map((c, i) => ({
-            criterionId: crypto.randomUUID(),
-            description: c.description.trim(),
-            maxScore: c.maxScore,
-            order: i,
-          })),
-      }),
-    onSuccess: (_data, _vars) => {
-      qc.invalidateQueries({ queryKey: ["rubric"] });
-      setRubricQ(null);
-      toast.success(t("rubric.versionCreated"));
-    },
-    onError: (e) => toast.error(friendlyError(e, t)),
-  });
+  async function handleRubricFileUpload(file: File) {
+    await uploadExamRubricFile(examId, file);
+    await qc.invalidateQueries({ queryKey: ["exam", examId] });
+  }
+  async function handleRubricFileDelete() {
+    await deleteExamRubricFile(examId);
+    await qc.invalidateQueries({ queryKey: ["exam", examId] });
+  }
 
   if (examQ.isLoading || questionsQ.isLoading) return <LoadingBlock />;
   if (examQ.isError)
     return <ErrorState message={friendlyError(examQ.error, t)} onRetry={() => examQ.refetch()} />;
 
+  const exam = examQ.data!;
+
   return (
     <>
       <PageHeader
-        title={examQ.data?.name ?? ""}
-        subtitle={`${t("exams.questionCountLabel", { count: questionsQ.data?.length ?? 0 })}${examQ.data?.description ? ` · ${examQ.data.description}` : ""}`}
+        title={exam.name}
+        subtitle={`${t("exams.questionCountLabel", { count: questionsQ.data?.length ?? 0 })}${exam.description ? ` · ${exam.description}` : ""}`}
         action={
           <div className="flex gap-2">
             <Link to="/exams">
@@ -197,16 +216,52 @@ export default function ExamDetailPage() {
         }
       />
 
+      {/* ── Exam-wide rubric (grading key) ────────────────────────────────
+          One file per exam: the AI extracts every question + its criteria
+          from it. Grading never re-reads this file — it uses the saved,
+          versioned rubric rows (editable in the grading workspace). */}
+      <Card className="mb-4">
+        <div className="flex flex-wrap items-start gap-4">
+          <div className="min-w-[240px] flex-1">
+            <FileAttachment
+              label={t("files.examRubricLabel")}
+              fileName={exam.rubricFileName ?? null}
+              contentType={exam.rubricFileContentType ?? null}
+              fileUrl={exam.rubricFileName ? examRubricFileUrl(examId) : null}
+              onUpload={handleRubricFileUpload}
+              onDelete={handleRubricFileDelete}
+              canEdit={canManage}
+            />
+          </div>
+          {canManage ? (
+            <div className="flex flex-col items-stretch justify-center gap-2">
+              <Button onClick={runExtraction} disabled={!exam.rubricFileName} loading={extractMut.isPending && !extractionOpen}>
+                <Sparkles size={15} /> {t("exams.extractQuestions")}
+              </Button>
+              <p className="max-w-[280px] text-[11px] leading-relaxed text-zinc-400">
+                {t("exams.rubricFileHintLong")}
+              </p>
+            </div>
+          ) : null}
+        </div>
+      </Card>
+
       {!questionsQ.data?.length ? (
         <Card>
           <EmptyState
             title={t("questions.title")}
-            hint={t("exams.noExamsHint")}
+            hint={canManage && exam.rubricFileName ? t("exams.extractHint") : t("questions.noQuestionsHint")}
             action={
               canManage ? (
-                <Button onClick={openCreateQuestion}>
-                  <Plus size={15} /> {t("questions.addQuestion")}
-                </Button>
+                exam.rubricFileName ? (
+                  <Button onClick={runExtraction} loading={extractMut.isPending && !extractionOpen}>
+                    <Sparkles size={15} /> {t("exams.extractQuestions")}
+                  </Button>
+                ) : (
+                  <Button onClick={openCreateQuestion}>
+                    <Plus size={15} /> {t("questions.addQuestion")}
+                  </Button>
+                )
               ) : undefined
             }
           />
@@ -220,7 +275,6 @@ export default function ExamDetailPage() {
               canManage={canManage}
               onEdit={() => openEditQuestion(q)}
               onDelete={() => deleteQuestionMut.mutate(q.id)}
-              onOpenRubric={() => openRubric(q)}
             />
           ))}
         </div>
@@ -284,14 +338,16 @@ export default function ExamDetailPage() {
         </form>
       </Dialog>
 
-      {/* Rubric editor */}
-      <RubricEditor
-        question={rubricQ}
-        criteria={criteria}
-        setCriteria={setCriteria}
-        onClose={() => setRubricQ(null)}
-        onSave={() => saveRubricMut.mutate()}
-        saving={saveRubricMut.isPending}
+      {/* AI extraction preview — rows are editable; Apply posts to /apply */}
+      <ExtractionPreviewDialog
+        open={extractionOpen}
+        onClose={() => setExtractionOpen(false)}
+        preview={extractMut.data ?? null}
+        running={extractMut.isPending}
+        error={extractionError}
+        existingNumbers={(questionsQ.data ?? []).map((q) => q.number)}
+        applying={applyMut.isPending}
+        onApply={(questions) => applyMut.mutate(questions)}
       />
     </>
   );
@@ -302,14 +358,12 @@ function QuestionCard({
   canManage,
   onEdit,
   onDelete,
-  onOpenRubric,
 }: {
   question: QuestionDto;
-  /** Teacher-only controls (edit/delete/rubric/file uploads) render when true. */
+  /** Teacher-only controls (edit/delete/file uploads) render when true. */
   canManage: boolean;
   onEdit: () => void;
   onDelete: () => void;
-  onOpenRubric: () => void;
 }) {
   const { t } = useTranslation();
   const lang = currentLang();
@@ -354,7 +408,6 @@ function QuestionCard({
     }
   }
 
-  // ── Question / Rubric document handlers (delegated to FileAttachment) ──
   async function handleQuestionFile(file: File) {
     await uploadQuestionFile(question.id, file);
     await qc.invalidateQueries({ queryKey: ["questions", question.examId] });
@@ -362,14 +415,6 @@ function QuestionCard({
   async function handleDeleteQuestionFile() {
     await deleteQuestionFile(question.id);
     await qc.invalidateQueries({ queryKey: ["questions", question.examId] });
-  }
-  async function handleRubricFile(file: File) {
-    await uploadRubricFile(question.id, file);
-    await qc.invalidateQueries({ queryKey: ["rubric", question.id] });
-  }
-  async function handleDeleteRubricFile() {
-    await deleteRubricFile(question.id);
-    await qc.invalidateQueries({ queryKey: ["rubric", question.id] });
   }
 
   return (
@@ -389,9 +434,9 @@ function QuestionCard({
 
       <p className="mb-3 line-clamp-3 text-sm text-zinc-600">{question.text}</p>
 
-      {/* Role-labeled attachments: clearly distinguish Question vs Rubric.
-          Upload/replace/delete are Teacher-only; non-teachers get read-only links. */}
-      <div className="mb-3 grid gap-2 sm:grid-cols-2">
+      {/* Question paper attachment. The rubric lives on the exam (see the card
+          above); per-question rubric files were removed with the new flow. */}
+      <div className="mb-3">
         <FileAttachment
           label={t("files.questionLabel")}
           fileName={question.fileName ?? null}
@@ -399,15 +444,6 @@ function QuestionCard({
           fileUrl={question.fileName ? questionFileUrl(question.id) : null}
           onUpload={handleQuestionFile}
           onDelete={handleDeleteQuestionFile}
-          canEdit={canManage}
-        />
-        <FileAttachment
-          label={t("files.rubricLabel")}
-          fileName={rubricQ.data?.fileName ?? null}
-          contentType={rubricQ.data?.contentType ?? null}
-          fileUrl={rubricQ.data?.fileName ? rubricFileUrl(question.id) : null}
-          onUpload={handleRubricFile}
-          onDelete={handleDeleteRubricFile}
           canEdit={canManage}
         />
       </div>
@@ -425,18 +461,13 @@ function QuestionCard({
 
       <div className="flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-3">
         {canManage ? (
-          <Button size="sm" variant="secondary" onClick={onOpenRubric}>
-            {t("rubric.editRubric")}
-          </Button>
-        ) : null}
-        {canManage ? (
           <label
-            className={clsx(
-              "inline-flex cursor-pointer items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-medium transition",
-              uploading
+            className={
+              "inline-flex cursor-pointer items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-medium transition " +
+              (uploading
                 ? "cursor-wait border-zinc-200 bg-zinc-50 text-zinc-400"
-                : "border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200"
-            )}
+                : "border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200")
+            }
           >
             <Upload size={13} />
             {uploading ? t("answers.uploading") : t("answers.uploadAnswer")}
@@ -459,98 +490,5 @@ function QuestionCard({
         ) : null}
       </div>
     </Card>
-  );
-}
-
-function RubricEditor({
-  question,
-  criteria,
-  setCriteria,
-  onClose,
-  onSave,
-  saving,
-}: {
-  question: QuestionDto | null;
-  criteria: RubricCriterionInput[];
-  setCriteria: (c: RubricCriterionInput[]) => void;
-  onClose: () => void;
-  onSave: () => void;
-  saving: boolean;
-}) {
-  const { t } = useTranslation();
-  const lang = currentLang();
-  if (!question) return null;
-  const total = criteria.reduce((s, c) => s + (Number(c.maxScore) || 0), 0);
-
-  return (
-    <Dialog
-      open
-      onClose={onClose}
-      title={`${t("rubric.title")} — ${t("questions.questionN", { number: question.number })}`}
-      description={t("rubric.hint")}
-      wide
-    >
-      <div className="space-y-2.5">
-        {criteria.map((c, i) => (
-          <div key={i} className="flex items-start gap-2">
-            <div className="flex-1">
-              <Textarea
-                rows={2}
-                value={c.description}
-                placeholder={t("rubric.criterionDescription")}
-                onChange={(e) => {
-                  const next = [...criteria];
-                  next[i] = { ...next[i], description: e.target.value };
-                  setCriteria(next);
-                }}
-              />
-            </div>
-            <div className="w-20">
-              <Input
-                type="number"
-                min={0}
-                step={0.5}
-                value={c.maxScore}
-                aria-label={t("questions.maxScore")}
-                onChange={(e) => {
-                  const next = [...criteria];
-                  next[i] = { ...next[i], maxScore: Number(e.target.value) };
-                  setCriteria(next);
-                }}
-              />
-            </div>
-            <button
-              type="button"
-              onClick={() => setCriteria(criteria.filter((_, j) => j !== i))}
-              className="mt-2 rounded-lg p-1.5 text-zinc-400 transition hover:bg-red-50 hover:text-red-600"
-              aria-label={t("common.delete")}
-            >
-              <Trash2 size={15} />
-            </button>
-          </div>
-        ))}
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => setCriteria([...criteria, { description: "", maxScore: 5 }])}
-        >
-          <Plus size={14} /> {t("rubric.addCriterion")}
-        </Button>
-      </div>
-      <p className="mt-3 text-xs text-zinc-500">
-        {t("rubric.totalMaxScore")}:{" "}
-        <strong className="tabular-nums">
-          {formatScore(total, lang)} / {formatScore(question.maxScore, lang)}
-        </strong>
-      </p>
-      <div className="mt-5 flex justify-end gap-2">
-        <Button variant="secondary" onClick={onClose}>
-          {t("common.cancel")}
-        </Button>
-        <Button onClick={onSave} loading={saving}>
-          {t("common.save")}
-        </Button>
-      </div>
-    </Dialog>
   );
 }

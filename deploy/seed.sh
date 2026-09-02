@@ -139,14 +139,14 @@ if [ -z "${SKIP_SEED:-}" ]; then
     qs=$(api GET "/api/questions/by-exam/$exam_id" "" "$ttoken")
     question_id=$(printf %s "$qs" | python3 -c 'import sys,json;d=json.load(sys.stdin);print(next((q["id"] for q in d if q["number"]==1),""))' 2>/dev/null || true)
     if [ -z "$question_id" ]; then
-      qbody=$(printf '{"examId":"%s","number":1,"text":"SMOKE TEST: Explain, in two or three sentences, how a central bank raising its policy rate typically affects consumer price inflation.","maxScore":10,"rubricText":"1) Mentions higher borrowing costs reducing demand (4 pts). 2) Links weaker demand to slower inflation (4 pts). 3) Coherent economic reasoning (2 pts)."}' "$exam_id")
+      qbody=$(printf '{"examId":"%s","number":1,"text":"SMOKE TEST: Explain, in two or three sentences, how a central bank raising its policy rate typically affects consumer price inflation.","maxScore":10}' "$exam_id")
       created_q=$(api POST /api/questions "$qbody" "$ttoken")
       question_id=$(jsonget "$created_q" id)
     fi
     [ -n "$question_id" ] && ok "demo-question" "maxScore=10" || bad "demo-question" "HTTP $API_STATUS"
 
-    # Active rubric with criteria — REQUIRED for grading (the orchestrator
-    # 404s without one; rubricText alone is not enough).
+    # Active rubric with criteria — REQUIRED for grading (grading uses saved
+    # structured criteria only; no rubric file or text is sent at grading time).
     api POST "/api/questions/$question_id/rubrics" \
       '{"criteria":[{"criterionId":"R1","description":"Mentions higher borrowing costs reducing demand","maxScore":4},{"criterionId":"R2","description":"Links weaker demand to slower inflation","maxScore":4},{"criterionId":"R3","description":"Coherent economic reasoning","maxScore":2}]}' \
       "$ttoken" >/dev/null

@@ -9,7 +9,7 @@ public interface IQuestionService
     Task<QuestionDto?> GetAsync(Guid id, CancellationToken ct = default);
     Task<IReadOnlyList<QuestionDto>> ListByExamAsync(Guid examId, CancellationToken ct = default);
     Task<QuestionDto> CreateAsync(CreateQuestionRequest request, CancellationToken ct = default);
-    Task<QuestionDto?> UpdateAsync(Guid id, string? text, decimal? maxScore, string? rubricText, CancellationToken ct = default);
+    Task<QuestionDto?> UpdateAsync(Guid id, string? text, decimal? maxScore, CancellationToken ct = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken ct = default);
     Task<RubricDto?> GetActiveRubricAsync(Guid questionId, CancellationToken ct = default);
     Task<RubricDto> CreateRubricAsync(CreateRubricRequest request, Guid createdByUserId, CancellationToken ct = default);
@@ -49,7 +49,6 @@ public sealed class QuestionService : IQuestionService
             Number = request.Number,
             Text = request.Text,
             MaxScore = request.MaxScore,
-            RubricText = request.RubricText,
             DisplayOrder = maxOrder + 1,
         };
         _db.Questions.Add(q);
@@ -58,13 +57,12 @@ public sealed class QuestionService : IQuestionService
         return Map(q);
     }
 
-    public async Task<QuestionDto?> UpdateAsync(Guid id, string? text, decimal? maxScore, string? rubricText, CancellationToken ct = default)
+    public async Task<QuestionDto?> UpdateAsync(Guid id, string? text, decimal? maxScore, CancellationToken ct = default)
     {
         var q = await _db.Questions.FindAsync([id], ct);
         if (q is null) return null;
         if (text != null) q.Text = text;
         if (maxScore.HasValue) q.MaxScore = maxScore.Value;
-        if (rubricText != null) q.RubricText = rubricText;
         await _db.SaveChangesAsync(ct);
         await _audit.WriteAsync("QuestionUpdated", "Question", q.Id, null, new { q.MaxScore });
         return Map(q);
@@ -92,9 +90,10 @@ public sealed class QuestionService : IQuestionService
 
     public async Task<RubricDto> CreateRubricAsync(CreateRubricRequest request, Guid createdByUserId, CancellationToken ct = default)
     {
-        var maxVersion = await _db.Rubrics
+        var priorVersions = await _db.Rubrics
             .Where(r => r.QuestionId == request.QuestionId)
-            .MaxAsync(r => (int?)r.Version, ct) ?? 0;
+            .ToListAsync(ct);
+        var maxVersion = priorVersions.Count == 0 ? 0 : priorVersions.Max(r => r.Version);
 
         var rubric = new Rubric
         {
@@ -114,19 +113,21 @@ public sealed class QuestionService : IQuestionService
             });
         }
         _db.Rubrics.Add(rubric);
+        // Exactly ONE active version per question: the newest (highest Version).
+        foreach (var prior in priorVersions)
+            prior.IsActive = false;
         await _db.SaveChangesAsync(ct);
         await _audit.WriteAsync("RubricCreated", "Rubric", rubric.Id, createdByUserId, new { rubric.QuestionId, rubric.Version });
         return MapRubric(rubric);
     }
 
     private static QuestionDto Map(Question q) =>
-        new(q.Id, q.ExamId, q.Number, q.Text, q.MaxScore, q.RubricText,
+        new(q.Id, q.ExamId, q.Number, q.Text, q.MaxScore,
             FileName: q.FileName, ContentType: q.ContentType);
 
     private static RubricDto MapRubric(Rubric r) => new(
         r.Id, r.QuestionId, r.Version, r.IsActive, r.CreatedAt,
         r.Criteria.Sum(c => c.MaxScore),
         r.Criteria.OrderBy(c => c.Order).Select(c =>
-            new RubricCriterionDto(c.CriterionId, c.Description, c.MaxScore, c.Order)).ToList(),
-        FileName: r.FileName, ContentType: r.ContentType);
+            new RubricCriterionDto(c.CriterionId, c.Description, c.MaxScore, c.Order)).ToList());
 }

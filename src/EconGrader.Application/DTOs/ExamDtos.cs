@@ -6,7 +6,9 @@ public record ExamDto(
     int Year,
     string? Description,
     DateTime CreatedAt,
-    string CreatedByName
+    string CreatedByName,
+    string? RubricFileName = null,
+    string? RubricFileContentType = null
 );
 
 public record CreateExamRequest(

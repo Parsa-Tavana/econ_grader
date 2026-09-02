@@ -34,6 +34,8 @@ public sealed class AppDbContext : DbContext, IAppDbContext
         b.Entity<Exam>(e =>
         {
             e.HasOne(x => x.CreatedBy).WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+            e.Property(x => x.RubricFileName).HasMaxLength(260);
+            e.Property(x => x.RubricFileContentType).HasMaxLength(128);
         });
 
         // ExamCorrector — Corrector↔Exam assignment (RBAC scope table)
@@ -59,8 +61,6 @@ public sealed class AppDbContext : DbContext, IAppDbContext
         {
             e.HasOne(x => x.Question).WithMany(x => x.Rubrics).HasForeignKey(x => x.QuestionId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => new { x.QuestionId, x.Version }).IsUnique();
-            e.Property(x => x.FileName).HasMaxLength(260);
-            e.Property(x => x.ContentType).HasMaxLength(128);
         });
 
         // RubricCriterion

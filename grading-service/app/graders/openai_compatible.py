@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 from .base import (
-    IVisionGrader, GradingResult, CriterionScore,
+    IVisionGrader, GradingResult, ExtractionResult, CriterionScore,
     ERROR_KIND_PARSE, ERROR_KIND_TIMEOUT, ModelOutputParseError,
 )
 from ..json_repair_util import parse_json_hardened
@@ -23,11 +23,38 @@ from ..config import settings
 
 logger = logging.getLogger(__name__)
 
+
+def _parse_response_body(resp: httpx.Response) -> dict[str, Any]:
+    """Decode a /chat/completions JSON body defensively.
+
+    Some gateways append SSE framing to non-streaming replies — e.g. 9router
+    ends the body with a stray "data: [DONE]\\n\\n" line after the JSON object —
+    which makes httpx's strict resp.json() raise JSONDecodeError("Extra data").
+    Decode with raw_decode (first JSON value wins) and unwrap the {"data":...}
+    envelope some gateways (e.g. api.cline.bot) add.
+    """
+    raw = resp.text
+    try:
+        body, _ = json.JSONDecoder().raw_decode(raw.lstrip())
+    except json.JSONDecodeError:
+        body = resp.json()  # surfaces the original error message
+    if isinstance(body, dict) and isinstance(body.get("data"), dict) and "choices" in body["data"]:
+        body = body["data"]
+    return body
+
 SYSTEM_PROMPT = (
     "You are a careful exam grader. Respond with JSON only. "
     "No markdown fences, no explanation outside JSON. "
     "Write ALL reasoning, criteria comments, and flagged_ambiguities in Persian (فارسی). "
     "The response JSON keys must stay exactly as specified (score, reasoning, criteria_scores, confidence, flagged_ambiguities)."
+)
+
+EXTRACTION_SYSTEM_PROMPT = (
+    "You extract exam questions and grading rubrics from grading-key documents. "
+    "Respond with JSON only. No markdown fences, no explanation outside JSON. "
+    "Copy all question and criterion text VERBATIM in the document's original "
+    "language (Persian stays Persian — never translate). "
+    "The response JSON keys must stay exactly as specified (questions, number, text, max_score, criteria, id, description)."
 )
 
 
@@ -62,17 +89,13 @@ class OpenAICompatibleGrader(IVisionGrader):
         temperature: float,
         prompt_version: str,
         extra_text: str = "",
-        rubric_text: str = "",
-        rubric_images: list[tuple[bytes, str]] | None = None,
-        document_only_rubric: bool = False,
     ) -> GradingResult:
         start_ms = time.time()
         model_name = self._model
         prompt_text = load_prompt(prompt_version)
-        rubric_images = rubric_images or []
 
         content: list[dict[str, Any]] = []
-        # Order matters: question paper → student answer → rubric document → prompt.
+        # Order matters: question paper → student answer → prompt.
         # Each image group gets an explicit TEXT label. Without one the model
         # receives an anonymous stack of pages and can attribute printed
         # question-paper figures (graphs, tables) to the student's own work
@@ -101,27 +124,9 @@ class OpenAICompatibleGrader(IVisionGrader):
             for i, (d, mt) in enumerate(answer_images, start=1):
                 content.append(_txt(f"[Student answer — page {i} of {total_answer_pages}]"))
                 content.append(_img(d, mt))
-        if rubric_images:
-            content.append(_txt("IMAGES OF THE UPLOADED RUBRIC DOCUMENT (grading material, not the answer):"))
-            content.extend(_img(d, mt) for d, mt in rubric_images)
         if extra_text.strip():
             # Extracted text from the student's typed answer documents
             content.append(_txt(f"Student typed answer documents:\n{extra_text.strip()}"))
-        if rubric_text.strip():
-            # Extracted text from the uploaded rubric document (DOCX/XLSX)
-            content.append(_txt(f"Rubric document:\n{rubric_text.strip()}"))
-        if document_only_rubric:
-            # The structured JSON sees an empty "criteria" array when the rubric
-            # ships ONLY as an uploaded document. Left alone, the "copy ids from
-            # the JSON / never invent ids" instruction makes the model refuse or
-            # award 0. Make the document authoritative instead.
-            content.append({"type": "text", "text":
-                "NOTE: The structured rubric JSON above is empty on purpose — this exam's "
-                "rubric is defined ONLY in the 'Rubric document:' text above. Grade strictly "
-                "against that document: use each criterion TITLE from the document as its "
-                "criterion id and the document's own max scores. Do NOT refuse to grade and "
-                "do NOT award zero merely because the structured criteria array is empty."
-            })
         content.append({"type": "text", "text": prompt_text.format(
             question_text=question_text,
             rubric_json=json.dumps(rubric, indent=2),
@@ -147,12 +152,7 @@ class OpenAICompatibleGrader(IVisionGrader):
                 timeout=140.0,
             )
             resp.raise_for_status()
-            body = resp.json()
-            # Some OpenAI-compatible gateways (e.g. api.cline.bot) wrap the
-            # payload in an extra {"data": {...}} envelope — unwrap it so the
-            # standard choices/usage access below keeps working everywhere.
-            if isinstance(body, dict) and isinstance(body.get("data"), dict) and "choices" in body["data"]:
-                body = body["data"]
+            body = _parse_response_body(resp)
             raw_text: str = body["choices"][0]["message"]["content"]
             latency_ms = int((time.time() - start_ms) * 1000)
             parsed = self._parse_response(raw_text)
@@ -209,6 +209,104 @@ class OpenAICompatibleGrader(IVisionGrader):
                 provider=self._provider_label, model_name=model_name, model_version=None,
                 prompt_version=prompt_version, temperature=temperature, ai_score=0.0,
                 reasoning="", raw_response="", latency_ms=int((time.time() - start_ms) * 1000),
+                error=f"{self._provider_label} API failure: {exc}",
+            )
+
+    def extract(
+        self,
+        *,
+        document_text: str,
+        document_images: list[tuple[bytes, str]],
+        document_name: str,
+        temperature: float,
+        prompt_version: str,
+    ) -> ExtractionResult:
+        """Extract all questions + rubric criteria from one exam-wide rubric
+        document. Same request shape as grade(); bigger token budget and a
+        longer timeout because grading-key PDFs produce large outputs and the
+        page images are heavy."""
+        start_ms = time.time()
+        model_name = self._model
+        prompt_text = load_prompt(prompt_version)
+
+        content: list[dict[str, Any]] = []
+        total_pages = len(document_images)
+        for i, (d, mt) in enumerate(document_images, start=1):
+            content.append({"type": "text", "text": f"[Rubric key — page {i} of {total_pages}]"})
+            content.append({"type": "image_url", "image_url": {
+                "url": f"data:{mt};base64,{base64.b64encode(d).decode()}"
+            }})
+        if document_text.strip():
+            content.append({"type": "text", "text":
+                f"Extracted text of the rubric document:\n{document_text.strip()}"
+            })
+        content.append({"type": "text", "text": prompt_text.format(
+            document_name=document_name or "rubric document",
+            document_pages=total_pages,
+            document_text=document_text.strip(),
+        )})
+
+        try:
+            resp = httpx.post(
+                f"{self._base_url}/chat/completions",
+                headers={
+                    "Authorization": f"{self._auth_scheme} {self._api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model_name,
+                    "messages": [
+                        {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
+                        {"role": "user", "content": content},
+                    ],
+                    "temperature": temperature,
+                    "max_tokens": settings.EXTRACTION_MAX_TOKENS,
+                },
+                timeout=settings.EXTRACTION_TIMEOUT_SECONDS,
+            )
+            resp.raise_for_status()
+            body = _parse_response_body(resp)
+            raw_text: str = body["choices"][0]["message"]["content"]
+            latency_ms = int((time.time() - start_ms) * 1000)
+            parsed = self._parse_response(raw_text)
+            usage = body.get("usage", {})
+            return ExtractionResult(
+                provider=self._provider_label,
+                model_name=model_name,
+                model_version=None,
+                prompt_version=prompt_version,
+                raw_response=raw_text,
+                parsed=parsed,
+                input_tokens=usage.get("prompt_tokens", 0),
+                output_tokens=usage.get("completion_tokens", 0),
+                latency_ms=latency_ms,
+            )
+        except ModelOutputParseError as exc:
+            logger.error('{"event":"extraction_parse_failure","provider":"%s","raw_preview":"%s"}',
+                         self._provider_label, raw_text[:200].replace('"', "'"))
+            return ExtractionResult(
+                provider=self._provider_label, model_name=model_name, model_version=None,
+                prompt_version=prompt_version,
+                raw_response=raw_text,
+                latency_ms=int((time.time() - start_ms) * 1000),
+                error=f"{self._provider_label} extraction response parse failure: {exc}",
+                error_kind=ERROR_KIND_PARSE,
+            )
+        except httpx.TimeoutException as exc:
+            logger.error('{"event":"extraction_upstream_timeout","provider":"%s"}', self._provider_label)
+            return ExtractionResult(
+                provider=self._provider_label, model_name=model_name, model_version=None,
+                prompt_version=prompt_version,
+                latency_ms=int((time.time() - start_ms) * 1000),
+                error=f"{self._provider_label} API failure: {exc}",
+                error_kind=ERROR_KIND_TIMEOUT,
+            )
+        except Exception as exc:
+            logger.exception("%s extraction failed", self._provider_label)
+            return ExtractionResult(
+                provider=self._provider_label, model_name=model_name, model_version=None,
+                prompt_version=prompt_version,
+                latency_ms=int((time.time() - start_ms) * 1000),
                 error=f"{self._provider_label} API failure: {exc}",
             )
 

@@ -1,5 +1,7 @@
 namespace EconGrader.Application.DTOs;
 
+using System.Text.Json.Serialization;
+
 /// <summary>
 /// Trimmed view of a GradingRun for lists/timelines — excludes RawAiResponse
 /// (often tens of KB per run) which only GET /api/grading/run/{id} returns.
@@ -76,7 +78,6 @@ public record GradingServiceRequest(
     GradingRubricDto Rubric,
     IReadOnlyList<string> AnswerImagePaths,
     IReadOnlyList<string> QuestionImagePaths,
-    IReadOnlyList<string>? RubricFilePaths = null,
     decimal MaxScore = 0,
     decimal Temperature = 0,
     string PromptVersion = "default"
@@ -85,3 +86,41 @@ public record GradingServiceRequest(
 public record GradingRubricDto(IReadOnlyList<GradingCriterionDto> Criteria);
 
 public record GradingCriterionDto(string Id, string Description, decimal MaxScore);
+
+/// <summary>
+/// Mirrors the Python /extract response. Uses explicit snake_case attribute
+/// mappings because the Python contract uses short keys (id, max_score) that
+/// the default SnakeCaseLower naming policy would mangle (criterion_id etc.).
+/// EVERY property needs an attribute — the deserializer runs without a naming
+/// policy, and an unbound "questions"/"error" leaves the property null and
+/// turns a clean AI-failure 502 into an unhandled NullReferenceException.
+/// </summary>
+public record ExtractionServiceResponse(
+    [property: JsonPropertyName("provider")] string Provider,
+    [property: JsonPropertyName("model_name")] string ModelName,
+    [property: JsonPropertyName("model_version")] string? ModelVersion,
+    [property: JsonPropertyName("prompt_version")] string PromptVersion,
+    [property: JsonPropertyName("questions")] IReadOnlyList<ExtractionQuestion> Questions,
+    [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings,
+    [property: JsonPropertyName("is_valid")] bool IsValid,
+    [property: JsonPropertyName("validation_errors")] IReadOnlyList<string> ValidationErrors,
+    [property: JsonPropertyName("raw_response")] string RawResponse,
+    [property: JsonPropertyName("input_tokens")] int InputTokens,
+    [property: JsonPropertyName("output_tokens")] int OutputTokens,
+    [property: JsonPropertyName("latency_ms")] long LatencyMs,
+    [property: JsonPropertyName("estimated_cost_usd")] decimal EstimatedCostUsd,
+    [property: JsonPropertyName("error")] string? Error
+);
+
+public record ExtractionQuestion(
+    [property: JsonPropertyName("number")] int Number,
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("max_score")] decimal MaxScore,
+    [property: JsonPropertyName("criteria")] IReadOnlyList<ExtractionCriterion> Criteria
+);
+
+public record ExtractionCriterion(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("description")] string Description,
+    [property: JsonPropertyName("max_score")] decimal MaxScore
+);

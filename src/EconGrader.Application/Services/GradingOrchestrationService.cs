@@ -73,19 +73,13 @@ public sealed class GradingOrchestrationService : IGradingOrchestrationService
 
         var rubric = await GetActiveRubricAsync(answer.QuestionId, ct);
 
-        // Attach every stored file that exists on disk, keeping roles apart:
-        // question-paper files become part of the question statement (merged
-        // with the typed question text by the grading service), rubric files
-        // are routed as rubric material.
+        // Attach the question-paper file if present on disk: it becomes part
+        // of the question statement (merged with the typed question text by
+        // the grading service). The rubric rides only as structured criteria
+        // in the payload — rubric documents are never sent at grading time.
         var questionFiles = new List<string>();
-        var rubricFiles = new List<string>();
-        void AddIfPresent(string? key, List<string> target)
-        {
-            if (!string.IsNullOrEmpty(key) && _storage.Exists(key))
-                target.Add(_storage.GetAbsolutePath(key));
-        }
-        AddIfPresent(answer.Question.FileStorageKey, questionFiles);   // question paper
-        AddIfPresent(rubric.FileStorageKey, rubricFiles);              // rubric document
+        if (!string.IsNullOrEmpty(answer.Question.FileStorageKey) && _storage.Exists(answer.Question.FileStorageKey))
+            questionFiles.Add(_storage.GetAbsolutePath(answer.Question.FileStorageKey));
 
         var answerPath = string.IsNullOrEmpty(answer.ImageStorageKey) || !_storage.Exists(answer.ImageStorageKey)
             ? null
@@ -104,15 +98,14 @@ public sealed class GradingOrchestrationService : IGradingOrchestrationService
             // merges its extracted text into the question statement per
             // provider capability.
             QuestionImagePaths: questionFiles.ToArray(),
-            RubricFilePaths: rubricFiles.ToArray(),
             MaxScore: answer.Question.MaxScore,
             Temperature: temperature,
             PromptVersion: promptVersion
         );
 
         _logger.LogInformation(
-            "Grading request prepared AnswerId={AnswerId} QuestionFiles={QuestionFiles} RubricFiles={RubricFiles}",
-            answerId, questionFiles.Count, rubricFiles.Count);
+            "Grading request prepared AnswerId={AnswerId} QuestionFiles={QuestionFiles} RubricCriteria={RubricCriteria}",
+            answerId, questionFiles.Count, rubric.Criteria.Count);
 
         // CRITICAL: teacher score is NEVER sent — only AI's independent view.
         var response = await _gradingClient.GradeAsync(request, ct);
@@ -185,16 +178,12 @@ public sealed class GradingOrchestrationService : IGradingOrchestrationService
             .FirstOrDefaultAsync(ct)
             ?? throw new NotFoundException("Active rubric for question", questionId);
 
-        // A rubric with zero criteria AND no rubric document leaves the AI with
-        // nothing to grade against — it either invents criteria (validation
-        // failure) or returns a 0 with no justification. Surface it as a clear
-        // client error. BUT a rubric that ships its criteria as an attached
-        // document (Excel/CSV/PDF/DOCX) is legitimate with zero structured
-        // criteria rows — the grading service extracts the document and the AI
-        // grades against it, so that case must NOT be blocked here.
-        if (rubric.Criteria.Count == 0 && string.IsNullOrEmpty(rubric.FileStorageKey))
+        // A rubric with zero criteria leaves the AI with nothing to grade
+        // against — it either invents criteria (validation failure) or returns
+        // a 0 with no justification. Surface it as a clear client error.
+        if (rubric.Criteria.Count == 0)
             throw new BusinessRuleException(
-                $"The active rubric for question {questionId} has no criteria and no rubric document — add at least one criterion or upload a rubric file before grading.",
+                $"The active rubric for question {questionId} has no criteria — add criteria (or extract them from the exam rubric file) before grading.",
                 "RUBRIC_EMPTY_CRITERIA");
 
         return rubric;

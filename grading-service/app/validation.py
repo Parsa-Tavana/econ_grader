@@ -23,16 +23,11 @@ def validate_grading_response(
     raw_text: str,
     max_score: float,
     rubric: dict[str, Any],
-    allow_unlisted_criteria: bool = False,
 ) -> tuple[bool, list[str]]:
     """Return (is_valid, validation_errors).
 
-    `allow_unlisted_criteria=True` is for rubrics whose criteria live entirely
-    in an attached document (Excel/PDF/DOCX) rather than structured rows: the
-    model returns criterion ids drawn from that document, which are unknown to
-    the structured rubric. We then validate each score against the rubric's
-    total max_score (and the AI's own per-criterion max_score, if provided)
-    instead of rejecting them as undefined.
+    The rubric always arrives as structured criteria rows from the database,
+    so every criterion id in the response must be defined in it.
     """
     errors: list[str] = []
 
@@ -79,18 +74,8 @@ def validate_grading_response(
             seen_ids.add(cid)
             cmx = max_by_id.get(cid)
             if cmx is None:
-                if not allow_unlisted_criteria:
-                    errors.append(f"Criterion '{cid}' is not defined in the rubric")
-                    continue
-                # Document-sourced rubric: no declared per-criterion max in the
-                # structured rubric, so bound by the AI's own per-criterion
-                # max_score if given, otherwise by the overall max_score.
-                try:
-                    cmx = float(c.get("max_score", max_score))
-                except (TypeError, ValueError):
-                    cmx = max_score
-                if cmx < 0:
-                    cmx = max_score
+                errors.append(f"Criterion '{cid}' is not defined in the rubric")
+                continue
             try:
                 cs = float(c["score"])
             except (TypeError, ValueError):
