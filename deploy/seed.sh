@@ -19,6 +19,15 @@
 # ═══════════════════════════════════════════════════════════════════════════
 set -uo pipefail
 
+# $(api ...) runs in a command-substitution subshell, so it cannot set
+# API_STATUS in the parent shell. The helper therefore persists the HTTP
+# status to a temp file; refresh_status() reads it back after each subshell
+# call. Direct (non-substituted) api calls still set API_STATUS normally.
+API_STATUS=000
+API_STATUS_FILE="$(mktemp -t econgrader-seed-status-XXXXXXXX)"
+trap 'rm -f "$API_STATUS_FILE"' EXIT
+refresh_status() { API_STATUS=$(cat "$API_STATUS_FILE" 2>/dev/null || printf 000); }
+
 BASE_URL="${BASE_URL:-http://localhost}"
 BASE_URL="${BASE_URL%/}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@example.dev}"
@@ -47,8 +56,11 @@ api() {
   [ -n "$token" ] && args+=(-H "Authorization: Bearer $token")
   [ -n "$body" ] && args+=(-d "$body")
   local out
-  if ! out=$(curl "${args[@]}" 2>/dev/null); then API_STATUS=000; echo ""; return 1; fi
+  if ! out=$(curl "${args[@]}" 2>/dev/null); then
+    API_STATUS=000; printf %s "$API_STATUS" > "$API_STATUS_FILE"; echo ""; return 1
+  fi
   API_STATUS=$(printf %s "$out" | tail -n1)
+  printf %s "$API_STATUS" > "$API_STATUS_FILE"
   printf %s "$out" | sed '$d'
 }
 
@@ -79,7 +91,8 @@ else bad "api-health" "no healthy response within 5 minutes"; exit 1; fi
 echo ""
 echo "[2/5] Admin account"
 token=""
-login=$(api POST /api/auth/login "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$AdminPassword\"}" "" 30)
+login=$(api POST /api/auth/login "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}" "" 30)
+refresh_status
 if [ "$API_STATUS" = "200" ]; then
   token=$(jsonget "$login" accessToken)
   ok "admin-login" "$ADMIN_EMAIL"
@@ -87,7 +100,8 @@ else
   if [ -z "${JWT_BOOTSTRAP_ADMIN_KEY:-}" ]; then
     bad "admin-login" "login failed and JWT_BOOTSTRAP_ADMIN_KEY is not set — cannot create admin"
   else
-    boot=$(api POST /api/auth/bootstrap-admin "{\"bootstrapKey\":\"$JWT_BOOTSTRAP_ADMIN_KEY\",\"email\":\"$ADMIN_EMAIL\",\"password\":\"$AdminPassword\",\"displayName\":\"Smoke Admin\"}" "" 30)
+    boot=$(api POST /api/auth/bootstrap-admin "{\"bootstrapKey\":\"$JWT_BOOTSTRAP_ADMIN_KEY\",\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\",\"displayName\":\"Smoke Admin\"}" "" 30)
+    refresh_status
     if [ "$API_STATUS" = "200" ]; then
       token=$(jsonget "$boot" accessToken)
       ok "admin-bootstrap" "$ADMIN_EMAIL"
@@ -121,26 +135,31 @@ if [ -z "${SKIP_SEED:-}" ]; then
     tlogin=$(api POST /api/auth/login "{\"email\":\"$TEACHER_EMAIL\",\"password\":\"$TEACHER_PASSWORD\"}")
     ttoken=$(jsonget "$tlogin" accessToken)
   fi
+  refresh_status
   if [ -n "$ttoken" ]; then ok "teacher-account" "$TEACHER_EMAIL"
   else bad "teacher-account" "could not create or log in teacher — seeding skipped"; fi
 
   if [ -n "$ttoken" ]; then
     # Exam (reuse by name from a previous run).
     exams=$(api GET /api/exams "" "$ttoken")
+    refresh_status
     exam_id=$(printf %s "$exams" | tr '{' '\n' | grep 'SMOKE-TEST Exam' | grep -o '"id":"[^"]*' | head -1 | cut -d'"' -f4)
     if [ -z "$exam_id" ]; then
       created=$(api POST /api/exams \
         '{"name":"SMOKE-TEST Exam","year":2026,"description":"Created by deploy/seed.sh - safe to delete"}' "$ttoken")
+      refresh_status
       exam_id=$(jsonget "$created" id)
     fi
     [ -n "$exam_id" ] && ok "demo-exam" "id=${exam_id:0:8}" || bad "demo-exam" "HTTP $API_STATUS"
 
     # Question #1 within that exam.
-    qs=$(api GET "/api/questions/by-exam/$exam_id" "" "$ttoken")
+    qs=$(api GET /api/questions/by-exam/"$exam_id" "" "$ttoken")
+    refresh_status
     question_id=$(printf %s "$qs" | python3 -c 'import sys,json;d=json.load(sys.stdin);print(next((q["id"] for q in d if q["number"]==1),""))' 2>/dev/null || true)
     if [ -z "$question_id" ]; then
       qbody=$(printf '{"examId":"%s","number":1,"text":"SMOKE TEST: Explain, in two or three sentences, how a central bank raising its policy rate typically affects consumer price inflation.","maxScore":10}' "$exam_id")
       created_q=$(api POST /api/questions "$qbody" "$ttoken")
+      refresh_status
       question_id=$(jsonget "$created_q" id)
     fi
     [ -n "$question_id" ] && ok "demo-question" "maxScore=10" || bad "demo-question" "HTTP $API_STATUS"
@@ -150,13 +169,19 @@ if [ -z "${SKIP_SEED:-}" ]; then
     api POST "/api/questions/$question_id/rubrics" \
       '{"criteria":[{"criterionId":"R1","description":"Mentions higher borrowing costs reducing demand","maxScore":4},{"criterionId":"R2","description":"Links weaker demand to slower inflation","maxScore":4},{"criterionId":"R3","description":"Coherent economic reasoning","maxScore":2}]}' \
       "$ttoken" >/dev/null
-    [ "$API_STATUS" = "200" ] || [ "$API_STATUS" = "201" ] && ok "demo-rubric" "3 criteria, 10 pts total" || bad "demo-rubric" "HTTP $API_STATUS (may already exist)"
+    if [ "$API_STATUS" = "200" ] || [ "$API_STATUS" = "201" ]; then
+      ok "demo-rubric" "3 criteria, 10 pts total"
+    else
+      bad "demo-rubric" "HTTP $API_STATUS (may already exist)"
+    fi
 
     # Student.
     students=$(api GET /api/students "" "$ttoken")
+    refresh_status
     student_id=$(printf %s "$students" | python3 -c 'import sys,json;d=json.load(sys.stdin);print(next((s["id"] for s in d if s["externalId"]=="smoke-stu-001"),""))' 2>/dev/null || true)
     if [ -z "$student_id" ]; then
       created_s=$(api POST /api/students '{"externalId":"smoke-stu-001","displayName":"Smoke Student"}' "$ttoken")
+      refresh_status
       student_id=$(jsonget "$created_s" id)
     fi
     [ -n "$student_id" ] && ok "demo-student" "id=${student_id:0:8}" || bad "demo-student" "HTTP $API_STATUS"
@@ -210,13 +235,30 @@ if [ -z "${SKIP_GRADING:-}" ]; then
     run=$(api POST /api/grading/run \
       "{\"answerId\":\"$answer_id\",\"temperature\":0,\"promptVersion\":\"default\",\"runs\":1}" \
       "$grader_token" 240)
-    provider=$(printf %s "$run" | python3 -c 'import sys,json;d=json.load(sys.stdin);r=d["runs"][0];print(r["provider"],r["aiScore"])' 2>/dev/null | awk '{print $1}')
-    score=$(printf %s "$run" | python3 -c 'import sys,json;d=json.load(sys.stdin);r=d["runs"][0];print(r["aiScore"])' 2>/dev/null || true)
-    if [ -n "$score" ] && [ "$score" != "None" ]; then
-      ok "grading-run" "provider=$provider score=$score/10"
-    else
-      bad "grading-run" "no valid AI score (check MODEL_PROVIDER / ANTHROPIC_API_KEY / 9router override)"
-    fi
+    refresh_status
+    # A failed provider call can still return a payload (the grading service
+    # falls back to score 0 with isValid=false). Gating only on the score
+    # produces a false PASS on a dead provider — require isValid too.
+    verdict=$(printf %s "$run" | python3 -c '
+import sys, json
+try:
+    r = json.load(sys.stdin)["runs"][0]
+except Exception as e:
+    print("PARSE-FAIL", e)
+    sys.exit(0)
+err = r.get("error") or ""
+if isinstance(err, list):
+    err = " | ".join(str(x) for x in err)
+valid = r.get("isValid", r.get("is_valid"))
+print("provider=%s score=%s valid=%s error=%s" % (r.get("provider"), r.get("aiScore"), valid, str(err)[:120]))
+' 2>/dev/null)
+    case "$verdict" in
+      *valid=True*|*valid=true*)
+        ok "grading-run" "${verdict#error=}";;
+      *)
+        bad "grading-run" "AI run not valid: ${verdict#error=}"
+        bad "grading-run" "check provider account/credit, MODEL_PROVIDER and keys in .env";;
+    esac
   fi
 else
   echo ""
