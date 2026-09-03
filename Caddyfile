@@ -22,3 +22,16 @@
 		reverse_proxy frontend:80
 	}
 }
+
+# ── Monitoring GUIs (deploy/vps/docker-compose.monitoring.yml) ───────────────
+# Dev defaults are *.localhost → Caddy issues internal certs, no ACME noise.
+# Production overrides both via .env (real subdomains → Let's Encrypt).
+{$LOGS_HOST:logs.localhost} {
+	encode zstd gzip
+	reverse_proxy dozzle:8080
+}
+
+{$DB_GUI_HOST:db.localhost} {
+	encode zstd gzip
+	reverse_proxy cloudbeaver:8978
+}

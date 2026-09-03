@@ -1,0 +1,59 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# EconGrader — monitoring GUIs (production overlay)
+#
+# Adds two admin tools behind Caddy, each on its own subdomain with its own
+# login. Included services are NOT exposed on host ports — Caddy is the only
+# entry point, same as the rest of the stack.
+#
+#   Dozzle      https://$LOGS_HOST   live stdout/stderr of every container
+#               (API requests, grading JSON records, provider errors)
+#               protected by dozzle users.yml (bcrypt, generated below)
+#
+#   CloudBeaver https://$DB_GUI_HOST  web DB console (SSMS-style) connecting
+#               to db,1433 INSIDE the docker network — SQL port stays closed.
+#               Has its own admin account on first visit.
+#
+# Required .env additions (generate with `openssl rand -hex 16` / base64):
+#   LOGS_HOST=logs.econgrade.com
+#   DB_GUI_HOST=db.econgrade.com
+#   DOZZLE_USERS_FILE=/etc/dozzle/users.yml (default, no need to set)
+#
+# Usage:
+#   sudo docker compose --env-file .env \
+#     -f deploy/vps/docker-compose.prod.yml \
+#     -f deploy/vps/docker-compose.monitoring.yml up -d
+#
+# DNS: A records for both subdomains → VPS IP, DNS-only (grey cloud),
+# same as the apex. Caddy obtains their certificates automatically.
+# ═══════════════════════════════════════════════════════════════════════════
+
+services:
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: econgrader-dozzle
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./dozzle-users.yml:/etc/dozzle/users.yml:ro
+    environment:
+      DOZZLE_LEVEL: info
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  cloudbeaver:
+    image: dbeaver/cloudbeaver:latest
+    container_name: econgrader-cloudbeaver
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  proxy:
+    environment:
+      - LOGS_HOST=${LOGS_HOST:?Set LOGS_HOST in .env (e.g. logs.econgrade.com)}
+      - DB_GUI_HOST=${DB_GUI_HOST:?Set DB_GUI_HOST in .env (e.g. db.econgrade.com)}
