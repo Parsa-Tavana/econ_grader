@@ -84,3 +84,4 @@ src/EconGrader.Web/appsettings.Development.json
 
 # QA session artifacts (evidence, fixtures, repro scripts)
 /qa-artifacts/
+deploy/vps/dozzle-users.yml
