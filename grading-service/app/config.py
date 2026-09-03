@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     GRADING_INTERNAL_KEY: str = ""
     ENVIRONMENT: str = "development"
 
+    # Langfuse tracing (optional). Unset keys → tracing disabled, zero effect
+    # on grading. HOST defaults to the compose-network service name; set the
+    # public https URL when calling Langfuse from outside Docker.
+    LANGFUSE_PUBLIC_KEY: str = ""
+    LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_HOST: str = "http://langfuse:3000"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

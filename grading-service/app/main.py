@@ -32,6 +32,7 @@ from .cost import estimate_cost
 from .prompts.loader import list_prompt_versions, load_prompt
 from .evaluation import compute_metrics, aggregate_by_provider
 from .internal_auth import require_internal_key
+from . import telemetry
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
@@ -365,6 +366,14 @@ async def grade(req: GradeRequest):
     )
 
     _log_request_response(req.model_dump(), resp, result.raw_response, latency_ms)
+    telemetry.trace_grade(
+        req=req.model_dump(),
+        result=result,
+        is_valid=resp.is_valid,
+        validation_errors=resp.validation_errors,
+        estimated_cost_usd=estimated_cost,
+        latency_ms=latency_ms,
+    )
     return resp
 
 
@@ -490,6 +499,13 @@ async def extract(req: ExtractionRequest):
            len(document_images), len(document_text), len(questions), is_valid, latency_ms,
            result.input_tokens, result.output_tokens, estimated_cost,
            json.dumps(result.error))
+    )
+    telemetry.trace_extract(
+        document_name=req.document_name or "rubric document",
+        result=result,
+        is_valid=resp.is_valid,
+        warnings=warnings,
+        latency_ms=latency_ms,
     )
     return resp
 

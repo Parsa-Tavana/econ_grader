@@ -12,3 +12,6 @@ xlrd==2.0.1
 pytest==8.3.4
 httpx==0.28.1
 python-multipart==0.0.20
+# Optional AI-call tracing to Langfuse (app/telemetry.py). Import is lazy —
+# without LANGFUSE_* keys in the environment nothing is initialised.
+langfuse==2.59.0

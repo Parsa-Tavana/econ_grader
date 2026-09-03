@@ -35,3 +35,9 @@
 	encode zstd gzip
 	reverse_proxy cloudbeaver:8978
 }
+
+# ── Langfuse AI-call analytics (deploy/vps/docker-compose.langfuse.yml) ──────
+{$AI_HOST:ai.localhost} {
+	encode zstd gzip
+	reverse_proxy langfuse:3000
+}
