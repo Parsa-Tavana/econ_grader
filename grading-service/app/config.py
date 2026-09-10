@@ -10,16 +10,16 @@ class Settings(BaseSettings):
     MODEL_PROVIDER: str = Field(default="glm", description="glm | gpt")
     # Per-provider models — each grader uses its own; MODEL_NAME stays as the
     # legacy fallback so existing deployments keep working.
-    MODEL_NAME: str = Field(default="GLM-5.3")
+    MODEL_NAME: str = Field(default="GLM-5.3-Flash")
     MODEL_VERSION: Optional[str] = None
 
     # API keys (from env/secrets)
     # First slot — GLM platform endpoint (default provider). OpenAI-compatible
     # /chat/completions with "apikey" auth (NOT Bearer).
-    GLM_BASE_URL: str = Field(default="", description="GLM endpoint WITHOUT /chat/completions")
+    GLM_BASE_URL: str = Field(default="https://api.arvancloudai.ir/v1", description="GLM endpoint WITHOUT /chat/completions")
     GLM_API_KEY: str = Field(default="not-needed")
-    GLM_MODEL: str = Field(default="GLM-5.3")
-    GLM_AUTH_SCHEME: str = Field(default="apikey", description="Authorization header prefix: Bearer | apikey")
+    GLM_MODEL: str = Field(default="GLM-5.3-Flash")
+    GLM_AUTH_SCHEME: str = Field(default="Bearer", description="Authorization header prefix: Bearer | apikey")
     # Second slot — GPT-5.6-Sol, reserved for future use (MODEL_PROVIDER=gpt).
     GPT_BASE_URL: str = Field(default="", description="GPT endpoint WITHOUT /chat/completions")
     GPT_API_KEY: str = Field(default="not-needed")

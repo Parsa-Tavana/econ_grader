@@ -529,7 +529,7 @@ const en = {
     hint: "Active on the grading workspace page",
   },
   providers: {
-    glm: "GLM-5.3",
+    glm: "GLM-5.3-Flash",
     gpt: "GPT-5.6-Sol",
     claude: "Claude",
   },

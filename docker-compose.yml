@@ -58,14 +58,14 @@ services:
     environment:
       # Which slot grades: glm (default) | gpt — set in .env (MODEL_PROVIDER).
       - MODEL_PROVIDER=${MODEL_PROVIDER:-glm}
-      # First slot — GLM platform endpoint (default provider). OpenAI-compatible
-      # /chat/completions with "apikey" auth. Values live in .env:
-      #   GLM_BASE_URL — the platform endpoint WITHOUT /chat/completions
-      #   GLM_API_KEY  — the access key (machine-user key)
-      - GLM_BASE_URL=${GLM_BASE_URL:-}
+      # First slot — ArvanCloud AI endpoint (default provider). OpenAI-compatible
+      # /chat/completions with Bearer auth. Values live in .env:
+      #   GLM_BASE_URL — the endpoint WITHOUT /chat/completions
+      #   GLM_API_KEY  — the API key
+      - GLM_BASE_URL=${GLM_BASE_URL:-https://api.arvancloudai.ir/v1}
       - GLM_API_KEY=${GLM_API_KEY:-}
-      - GLM_MODEL=${GLM_MODEL:-GLM-5.3}
-      - GLM_AUTH_SCHEME=apikey
+      - GLM_MODEL=${GLM_MODEL:-GLM-5.3-Flash}
+      - GLM_AUTH_SCHEME=${GLM_AUTH_SCHEME:-Bearer}
       # Second slot — GPT-5.6-Sol, reserved for future use (MODEL_PROVIDER=gpt
       # switches to it). Values live in .env.
       - GPT_BASE_URL=${GPT_BASE_URL:-}

@@ -524,7 +524,7 @@ const fa = {
     hint: "در صفحه تصحیح فعال هستند",
   },
   providers: {
-    glm: "GLM-5.3",
+    glm: "GLM-5.3-Flash",
     gpt: "GPT-5.6-Sol",
     claude: "Claude",
   },
