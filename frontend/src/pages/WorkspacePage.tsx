@@ -7,18 +7,21 @@ import {
   Bot,
   Check,
   FileText,
+  Layers,
   Pencil,
   Play,
+  Plus,
   ShieldCheck,
+  Trash2,
 } from "lucide-react";
 import {
   getAnswer,
-  getAnswerImageUrl,
   setTeacherScore as apiSetTeacherScore,
   listAnswersByQuestion,
 } from "../api/answers";
-import { apiErrorMessage } from "../api/client";
-import { getQuestion, getActiveRubric } from "../api/questions";
+import { apiErrorMessage, fetchAuthenticatedFile } from "../api/client";
+import { getQuestion, getActiveRubric, createRubric } from "../api/questions";
+import type { RubricCriterionDto } from "../types/models";
 import {
   runGrading,
   listRunsForAnswer,
@@ -34,8 +37,8 @@ import {
   Card,
   CardHeader,
   Badge,
-  Select,
   Input,
+  Textarea,
   Field,
   Button,
   LoadingBlock,
@@ -99,7 +102,6 @@ export default function WorkspacePage() {
   const nextAnswer = idx >= 0 && idx < siblings.length - 1 ? siblings[idx + 1] : null;
 
   // grading controls
-  const [provider, setProvider] = useState("");
   const [temperature, setTemperature] = useState(0);
   const [runCount, setRunCount] = useState(1);
 
@@ -111,6 +113,12 @@ export default function WorkspacePage() {
   const [reviewMode, setReviewMode] = useState<"accept" | "override" | null>(null);
   const [overrideScore, setOverrideScore] = useState<number>(0);
   const [note, setNote] = useState("");
+
+  // rubric editor state (Teacher-only card) — editing rows for the active rubric
+  const [rubricRows, setRubricRows] = useState<RubricCriterionDto[] | null>(null);
+  function rubricRowKey(questionNumber: number): string {
+    return `q${questionNumber}${String.fromCharCode(97 + (rubricRows?.length ?? 0))}`;
+  }
 
   const latestValid = useMemo(
     () =>
@@ -132,7 +140,6 @@ export default function WorkspacePage() {
     mutationFn: () =>
       runGrading({
         answerId,
-        provider: provider || null,
         temperature,
         runs: runCount,
       }),
@@ -195,6 +202,31 @@ export default function WorkspacePage() {
     setReviewMode(mode);
   }
 
+  // Grading reads the SAVED active rubric rows from the DB. Saving here
+  // creates a new version (POST /questions/{id}/rubrics) — the next run uses
+  // it; previous versions stay in history.
+  const saveRubricMut = useMutation({
+    mutationFn: () =>
+      createRubric({
+        questionId: answer.questionId,
+        criteria: (rubricRows ?? [])
+          .filter((c) => c.description.trim())
+          .map((c, i) => ({
+            criterionId: c.criterionId.trim(),
+            description: c.description.trim(),
+            maxScore: c.maxScore,
+            order: i,
+          })),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["rubric", answer.questionId] });
+      qc.invalidateQueries({ queryKey: ["question-single", answer.questionId] });
+      setRubricRows(null);
+      toast.success(t("rubric.versionCreated"));
+    },
+    onError: (e) => toast.error(friendlyError(apiErrorMessage(e), t)),
+  });
+
   function handleReviewSubmit(e: React.FormEvent) {
     e.preventDefault();
     reviewMut.mutate();
@@ -207,6 +239,13 @@ export default function WorkspacePage() {
   const answer = answerQ.data!;
   const question = questionQ.data;
   const criteriaScores = activeRun ? parseCriteriaScores(activeRun.criteriaScoresJson) : [];
+
+  const rubricSum = (rubricRows ?? []).reduce(
+    (s, c) => s + (Number(c.maxScore) || 0),
+    0
+  );
+  const rubricSumMismatch =
+    question != null && Math.abs(rubricSum - question.maxScore) > 1e-9;
 
   return (
     <>
@@ -237,11 +276,30 @@ export default function WorkspacePage() {
               <div className="flex h-40 flex-col items-center justify-center gap-2 text-sm text-zinc-500">
                 <FileText size={22} className="text-red-400" />
                 <span>{answer.fileName ?? t("viewer.answerScan")}</span>
-                <a href={getAnswerImageUrl(answer.id)} target="_blank" rel="noreferrer">
-                  <Button size="sm" variant="secondary">
-                    {t("common.download")}
-                  </Button>
-                </a>
+                {/* Authenticated download — a bare <a href> cannot attach the JWT and gets 401. */}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={async () => {
+                    try {
+                      const file = await fetchAuthenticatedFile(
+                        `/answers/${answer.id}/image`,
+                        answer.fileName ?? "answer"
+                      );
+                      const a = document.createElement("a");
+                      a.href = file.url;
+                      a.download = file.fileName;
+                      document.body.appendChild(a);
+                      a.click();
+                      a.remove();
+                      setTimeout(() => URL.revokeObjectURL(file.url), 10_000);
+                    } catch (e) {
+                      toast.error(friendlyError(apiErrorMessage(e), t));
+                    }
+                  }}
+                >
+                  {t("common.download")}
+                </Button>
               </div>
             ) : (
               /* Authenticated blob fetch — bare img/iframe URLs get 401 (no JWT header). */
@@ -263,7 +321,7 @@ export default function WorkspacePage() {
                 {t("questions.text")}
               </summary>
               <p className="mt-2 leading-relaxed text-zinc-600">{question.text}</p>
-              {rubricQ.data ? (
+              {rubricQ.data && !canRunGrading ? (
                 <ul className="mt-3 space-y-1.5 border-t border-zinc-100 pt-3 text-xs">
                   {rubricQ.data.criteria.map((c) => (
                     <li key={c.criterionId} className="flex justify-between gap-3">
@@ -278,6 +336,148 @@ export default function WorkspacePage() {
             </details>
           ) : null}
         </Card>
+
+        {/* ── Rubric editor (Teacher-only) ─────────────────────────────────
+            Prefilled from the active rubric rows; saving creates a new
+            version and the next AI run grades against it. Non-teachers keep
+            the read-only list in the details block above. */}
+        {canRunGrading && question ? (
+          <Card>
+            <CardHeader
+              title={t("rubric.title")}
+              subtitle={
+                rubricQ.data
+                  ? t("rubric.versionN", { version: rubricQ.data.version })
+                  : t("rubric.noRubricHint")
+              }
+              action={<Layers size={16} className="text-primary-500" />}
+            />
+            {rubricRows === null ? (
+              <>
+                {rubricQ.data ? (
+                  <ul className="mb-3 space-y-1 rounded-lg bg-zinc-50 p-2.5 text-xs text-zinc-600">
+                    {rubricQ.data.criteria.map((c) => (
+                      <li key={c.criterionId} className="flex justify-between gap-2">
+                        <span className="line-clamp-1">{c.description}</span>
+                        <span className="shrink-0 font-medium tabular-nums">
+                          {formatScore(c.maxScore, lang)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="py-4 text-center text-sm text-zinc-400">{t("rubric.noRubric")}</p>
+                )}
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() =>
+                      setRubricRows(
+                        rubricQ.data
+                          ? rubricQ.data.criteria.map((c) => ({ ...c }))
+                          : [
+                              {
+                                criterionId: rubricRowKey(question.number),
+                                description: "",
+                                maxScore: 1,
+                                order: 0,
+                              },
+                            ]
+                      )
+                    }
+                  >
+                    <Pencil size={13} /> {t("rubric.editRubric")}
+                  </Button>
+                  <p className="text-[11px] text-zinc-400">{t("rubric.workspaceHint")}</p>
+                </div>
+              </>
+            ) : (
+              <div className="space-y-2">
+                {(rubricRows ?? []).map((c, i) => (
+                  <div key={i} className="flex items-start gap-2">
+                    <div className="flex-1">
+                      <Textarea
+                        rows={2}
+                        value={c.description}
+                        placeholder={t("rubric.criterionDescription")}
+                        onChange={(e) =>
+                          setRubricRows(
+                            rubricRows.map((r, j) =>
+                              j === i ? { ...r, description: e.target.value } : r
+                            )
+                          )
+                        }
+                      />
+                    </div>
+                    <div className="w-20">
+                      <Input
+                        type="number"
+                        min={0}
+                        step={0.5}
+                        value={c.maxScore}
+                        aria-label={t("questions.maxScore")}
+                        onChange={(e) =>
+                          setRubricRows(
+                            rubricRows.map((r, j) =>
+                              j === i ? { ...r, maxScore: Number(e.target.value) } : r
+                            )
+                          )
+                        }
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setRubricRows(rubricRows.filter((_, j) => j !== i))}
+                      className="mt-2 rounded-lg p-1.5 text-zinc-400 transition hover:bg-red-50 hover:text-red-600"
+                      aria-label={t("rubric.removeCriterion")}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                ))}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() =>
+                    setRubricRows([
+                      ...rubricRows,
+                      {
+                        criterionId: rubricRowKey(question.number),
+                        description: "",
+                        maxScore: 1,
+                        order: rubricRows.length,
+                      },
+                    ])
+                  }
+                >
+                  <Plus size={14} /> {t("rubric.addCriterion")}
+                </Button>
+                {rubricSumMismatch ? (
+                  <p className="rounded-xl bg-amber-50 p-2.5 text-xs text-amber-800">
+                    {t("rubric.totalScoreMismatch", {
+                      sum: formatScore(rubricSum, lang),
+                      max: formatScore(question.maxScore, lang),
+                    })}
+                  </p>
+                ) : null}
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  <Button variant="secondary" size="sm" onClick={() => setRubricRows(null)}>
+                    {t("common.cancel")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => saveRubricMut.mutate()}
+                    loading={saveRubricMut.isPending}
+                    disabled={saveRubricMut.isPending || !(rubricRows ?? []).some((c) => c.description.trim())}
+                  >
+                    {t("rubric.saveNewVersion")}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </Card>
+        ) : null}
 
         {/* ── AI result + review pane ── */}
         <div className="space-y-4">
@@ -419,16 +619,7 @@ export default function WorkspacePage() {
               subtitle={t("gradingDialog.blindGradingNote")}
               action={<Bot size={16} className="text-primary-500" />}
             />
-            <div className="grid gap-3 sm:grid-cols-3">
-              <Field label={t("gradingDialog.provider")}>
-                <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
-                  <option value="">{t("providers.any")}</option>
-                  <option value="claude">{t("providers.claude")}</option>
-                  <option value="gemini">{t("providers.gemini")}</option>
-                  <option value="qwen">{t("providers.qwen")}</option>
-                  <option value="gpt">{t("providers.gpt")}</option>
-                </Select>
-              </Field>
+            <div className="grid gap-3 sm:grid-cols-2">
               <Field label={t("gradingDialog.temperature")}>
                 <Input
                   type="number"
@@ -450,7 +641,7 @@ export default function WorkspacePage() {
               </Field>
             </div>
             <div className="mt-4 flex items-center justify-between gap-3">
-              <p className="text-[11px] text-zinc-400">{t("gradingDialog.estimatedCostNote")}</p>
+              <p className="text-[11px] text-zinc-400">{t("gradingDialog.usesSavedRubric")}</p>
               <Button onClick={() => runMut.mutate()} loading={runMut.isPending}>
                 <Play size={15} /> {t("gradingDialog.startGrading")}
               </Button>
@@ -595,10 +786,13 @@ export default function WorkspacePage() {
 }
 
 const PROVIDER_KEYS: Record<string, string> = {
-  claude: "providers.claude",
-  gemini: "providers.gemini",
-  qwen: "providers.qwen",
+  // Current slots.
+  glm: "providers.glm",
   gpt: "providers.gpt",
+  // Legacy labels — old DB rows were stored as "qwen" (the GLM slot's former
+  // internal name) or "claude"; map them so history stays readable.
+  qwen: "providers.glm",
+  claude: "providers.claude",
 };
 
 function RunRow({

@@ -1,6 +1,9 @@
-"""GptVisionGrader — GPT slot on an OpenAI-compatible gateway (GPT_* settings)."""
+"""GptVisionGrader — GPT slot on an OpenAI-compatible gateway (GPT_* settings).
+
+Reserved for future use; MODEL_PROVIDER=gpt activates it.
+"""
 from ..config import settings
-from .qwen_grader import OpenAICompatibleGrader
+from .openai_compatible import OpenAICompatibleGrader
 
 
 class GptVisionGrader(OpenAICompatibleGrader):

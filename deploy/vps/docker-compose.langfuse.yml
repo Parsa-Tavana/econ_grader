@@ -1,0 +1,85 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# EconGrader — Langfuse AI-call analytics (production overlay)
+#
+# Adds Langfuse (trace UI for every AI grading/extraction call: prompt,
+# output, tokens, cost, latency, per-student/session grouping) plus its own
+# Postgres. Routed through Caddy at $AI_HOST (e.g. ai.econgrade.com) with its
+# own Let's Encrypt certificate.
+#
+# Required .env values:
+#   AI_HOST=ai.econgrade.com            # public hostname
+#   LANGFUSE_DB_PASSWORD=<openssl rand -base64 24>
+#   LANGFUSE_NEXTAUTH_SECRET=<openssl rand -base64 32>
+#   LANGFUSE_SALT=<openssl rand -base64 32>   # MUST stay stable — changing
+#                                     # it invalidates all stored credentials
+#
+# After first login in the UI, create an API key pair and add to .env, then
+# `up -d grading` again (grading reads LANGFUSE_PUBLIC_KEY/SECRET_KEY):
+#   LANGFUSE_PUBLIC_KEY=pk-lf-...
+#   LANGFUSE_SECRET_KEY=sk-lf-...
+#
+# The grading service reaches Langfuse inside the compose network at
+# http://langfuse:3000 — that is the default LANGFUSE_HOST.
+#
+# Usage:
+#   sudo docker compose --env-file .env \
+#     -f deploy/vps/docker-compose.prod.yml \
+#     -f deploy/vps/docker-compose.monitoring.yml \
+#     -f deploy/vps/docker-compose.langfuse.yml up -d
+# ═══════════════════════════════════════════════════════════════════════════
+
+services:
+  langfuse-db:
+    image: postgres:16-alpine
+    container_name: econgrader-langfuse-db
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:?Set LANGFUSE_DB_PASSWORD in .env}
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U langfuse" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  langfuse:
+    image: langfuse/langfuse:2
+    container_name: econgrader-langfuse
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://langfuse:${LANGFUSE_DB_PASSWORD}@langfuse-db:5432/langfuse
+      NEXTAUTH_URL: https://${AI_HOST:?Set AI_HOST in .env (e.g. ai.econgrade.com)}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?Set LANGFUSE_NEXTAUTH_SECRET in .env}
+      SALT: ${LANGFUSE_SALT:-${LANGFUSE_NEXTAUTH_SECRET}}
+      TELEMETRY_ENABLED: "false"
+      # Behind Caddy (reverse proxy) — do not force https redirects internally.
+      ENABLE_TOKEN_LOGOUT: "false"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  grading:
+    environment:
+      - LANGFUSE_HOST=http://langfuse:3000
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+
+  proxy:
+    environment:
+      - AI_HOST=${AI_HOST:?Set AI_HOST in .env}
+
+volumes:
+  langfuse_db_data:

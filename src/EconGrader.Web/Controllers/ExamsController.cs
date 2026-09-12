@@ -19,13 +19,24 @@ public sealed class ExamsController : ControllerBase
     private readonly IAccessScopeService _scope;
     private readonly CurrentUser _user;
     private readonly IAppDbContext _db;
+    private readonly IFileStorage _storage;
+    private readonly IAuditLogger _audit;
+    private readonly IExamExtractionService _extraction;
+    private readonly ILogger<ExamsController> _logger;
 
-    public ExamsController(IExamService svc, IAccessScopeService scope, CurrentUser user, IAppDbContext db)
+    public ExamsController(
+        IExamService svc, IAccessScopeService scope, CurrentUser user, IAppDbContext db,
+        IFileStorage storage, IAuditLogger audit, IExamExtractionService extraction,
+        ILogger<ExamsController> logger)
     {
         _svc = svc;
         _scope = scope;
         _user = user;
         _db = db;
+        _storage = storage;
+        _audit = audit;
+        _extraction = extraction;
+        _logger = logger;
     }
 
     /// <summary>Single exam. Teachers see their own; correctors assigned ones;
@@ -78,6 +89,114 @@ public sealed class ExamsController : ControllerBase
     {
         await _scope.AssertExamAccessAsync(_user, id, writeAccess: true, ct);
         return await _svc.DeleteAsync(id, ct) ? NoContent() : NotFound();
+    }
+
+    // ── Exam-wide rubric file (the grading key extraction source) ───────────
+
+    /// <summary>
+    /// Upload/replace the exam-wide rubric document — the grading key the AI
+    /// extracts ALL questions + their rubric criteria from (PDF/PNG/JPG/DOCX/
+    /// XLSX/XLS, ≤20 MB). Stored on the exam, not per question.
+    /// </summary>
+    [HttpPost("{id:guid}/rubric/file")]
+    [Authorize(Roles = nameof(UserRole.Teacher))]
+    [RequestSizeLimit(FileUploadValidator.MaxBytes)]
+    public async Task<IActionResult> UploadRubricFile(Guid id, IFormFile file, CancellationToken ct)
+    {
+        await _scope.AssertExamAccessAsync(_user, id, writeAccess: true, ct);
+        if (file.Length == 0) return BadRequest(new { code = "EMPTY_FILE", message = "Empty file" });
+        var ext = FileUploadValidator.ExtensionForFile(file.ContentType, file.FileName);
+        if (ext is null)
+            return StatusCode(415, new { code = "UNSUPPORTED_MEDIA_TYPE", message = $"Unsupported file type '{file.ContentType}' — use {FileUploadValidator.AcceptedTypesDisplay}" });
+
+        var exam = await _db.Exams.FindAsync([id], ct);
+        if (exam is null) return NotFound();
+
+        // Delete the previous file to avoid orphaned blobs.
+        if (!string.IsNullOrEmpty(exam.RubricFileStorageKey))
+        {
+            try { await _storage.DeleteAsync(exam.RubricFileStorageKey, ct); }
+            catch (IOException ex) { _logger.LogWarning(ex, "Could not delete previous exam rubric file {Key}", exam.RubricFileStorageKey); }
+        }
+
+        var key = $"rubrics/exams/{id:N}/{Guid.NewGuid():N}{ext}";
+        await using var stream = file.OpenReadStream();
+        await _storage.SaveAsync(stream, key, ct);
+
+        exam.RubricFileStorageKey = key;
+        exam.RubricFileName = Path.GetFileName(file.FileName); // strip any path segments
+        exam.RubricFileContentType = file.ContentType;
+        await _db.SaveChangesAsync(ct);
+
+        await _audit.WriteAsync("ExamRubricFileUploaded", "Exam", id, _user.UserId, new { exam.RubricFileName, bytes = file.Length }, cancellationToken: ct);
+        _logger.LogInformation("Exam rubric file uploaded {ExamId} {FileName} ({Bytes} bytes)", id, exam.RubricFileName, file.Length);
+        return Ok(new { fileName = exam.RubricFileName, contentType = exam.RubricFileContentType });
+    }
+
+    /// <summary>Download/stream the stored exam-wide rubric document.</summary>
+    [HttpGet("{id:guid}/rubric/file")]
+    public async Task<IActionResult> DownloadRubricFile(Guid id, CancellationToken ct)
+    {
+        await _scope.AssertExamAccessAsync(_user, id, writeAccess: false, ct);
+        var exam = await _db.Exams.FindAsync([id], ct);
+        if (exam is null || string.IsNullOrEmpty(exam.RubricFileStorageKey)) return NotFound();
+
+        var stream = await _storage.OpenReadAsync(exam.RubricFileStorageKey, ct);
+        if (stream is null) return NotFound();
+
+        return File(stream, exam.RubricFileContentType ?? "application/octet-stream",
+            exam.RubricFileName ?? $"exam-rubric-{id}");
+    }
+
+    /// <summary>Remove the exam-wide rubric document. Extracted questions are
+    /// NOT touched — re-extraction just needs a file uploaded again.</summary>
+    [HttpDelete("{id:guid}/rubric/file")]
+    [Authorize(Roles = nameof(UserRole.Teacher))]
+    public async Task<IActionResult> DeleteRubricFile(Guid id, CancellationToken ct)
+    {
+        await _scope.AssertExamAccessAsync(_user, id, writeAccess: true, ct);
+        var exam = await _db.Exams.FindAsync([id], ct);
+        if (exam is null) return NotFound();
+        if (string.IsNullOrEmpty(exam.RubricFileStorageKey)) return NoContent();
+
+        try { await _storage.DeleteAsync(exam.RubricFileStorageKey, ct); }
+        catch (IOException ex) { _logger.LogWarning(ex, "Could not delete exam rubric file {Key}", exam.RubricFileStorageKey); }
+
+        exam.RubricFileStorageKey = null;
+        exam.RubricFileName = null;
+        exam.RubricFileContentType = null;
+        await _db.SaveChangesAsync(ct);
+
+        await _audit.WriteAsync("ExamRubricFileDeleted", "Exam", id, _user.UserId, null, cancellationToken: ct);
+        return NoContent();
+    }
+
+    // ── AI extraction: rubric file → questions + rubric criteria ────────────
+
+    /// <summary>
+    /// Run AI extraction over the exam's rubric file and return the result as
+    /// an EDITABLE PREVIEW. Saves nothing — confirm via POST /extraction/apply.
+    /// </summary>
+    [HttpPost("{id:guid}/extraction/preview")]
+    [Authorize(Roles = nameof(UserRole.Teacher))]
+    public async Task<ActionResult<ExtractionPreviewDto>> ExtractionPreview(Guid id, CancellationToken ct)
+    {
+        await _scope.AssertExamAccessAsync(_user, id, writeAccess: true, ct); // extraction burns tokens — owners only
+        return Ok(await _extraction.ExtractPreviewAsync(id, ct));
+    }
+
+    /// <summary>
+    /// Persist confirmed extraction rows: questions matching an existing number
+    /// are updated (changed rubrics become a new version), missing numbers are
+    /// created; questions NOT in the payload are left untouched.
+    /// </summary>
+    [HttpPost("{id:guid}/extraction/apply")]
+    [Authorize(Roles = nameof(UserRole.Teacher))]
+    public async Task<ActionResult<ApplyExtractionResultDto>> ExtractionApply(
+        Guid id, [FromBody] ApplyExtractionRequest request, CancellationToken ct)
+    {
+        await _scope.AssertExamAccessAsync(_user, id, writeAccess: true, ct);
+        return Ok(await _extraction.ApplyAsync(id, request, _user.UserId, ct));
     }
 
     // ── Corrector assignment (exam owner / admin only) ──────────────────────

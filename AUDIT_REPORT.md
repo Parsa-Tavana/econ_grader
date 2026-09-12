@@ -92,7 +92,7 @@ Keys exist (`evaluation.providerFilter/modelFilter`). **NOT FIXED — roadmap.**
 | GET /api/exams, POST/PUT/DELETE /api/exams | PASS |
 | GET /api/questions/by-exam/{id}, GET/POST/PUT/DELETE /api/questions | PASS |
 | GET /api/questions/{id}/rubric, POST …/rubrics | PASS |
-| POST/GET/DELETE /api/questions/{id}/file, …/rubric/file | PASS (new) |
+| POST/GET/DELETE /api/questions/{id}/file (question paper) | PASS (new) |
 | GET /api/students, POST /api/students | PASS |
 | GET /api/answers/by-question/{id}, GET /{id} | PASS |
 | POST /api/answers/upload (PNG/JPG/PDF/DOCX) | PASS (extended) |

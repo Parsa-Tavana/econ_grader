@@ -56,20 +56,33 @@ services:
       dockerfile: ../Dockerfile.grading
     container_name: econgrader-grading
     environment:
-      - MODEL_PROVIDER=claude
-      # Direct Anthropic API. To route through a local gateway (e.g. the
-      # 9router desktop proxy), see docker-compose.override.yml.example.
-      - MODEL_NAME=claude-sonnet-4-5
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-      - QWEN_BASE_URL=http://localhost:8000/v1
-      - QWEN_API_KEY=not-needed
+      # Which slot grades: glm (default) | gpt — set in .env (MODEL_PROVIDER).
+      - MODEL_PROVIDER=${MODEL_PROVIDER:-glm}
+      # First slot — ArvanCloud AI endpoint (default provider). OpenAI-compatible
+      # /chat/completions with Bearer auth. Values live in .env:
+      #   GLM_BASE_URL — the endpoint WITHOUT /chat/completions
+      #   GLM_API_KEY  — the API key
+      - GLM_BASE_URL=${GLM_BASE_URL:-https://api.arvancloudai.ir/v1}
+      - GLM_API_KEY=${GLM_API_KEY:-}
+      - GLM_MODEL=${GLM_MODEL:-GLM-5.3-Flash}
+      - GLM_AUTH_SCHEME=${GLM_AUTH_SCHEME:-Bearer}
+      # Second slot — GPT-5.6-Sol, reserved for future use (MODEL_PROVIDER=gpt
+      # switches to it). Values live in .env.
+      - GPT_BASE_URL=${GPT_BASE_URL:-}
+      - GPT_API_KEY=${GPT_API_KEY:-}
+      - GPT_MODEL=${GPT_MODEL:-GPT-5.6-Sol}
+      - GPT_AUTH_SCHEME=apikey
       - DEFAULT_TEMPERATURE=0.0
       # Headroom for thinking-style models: they emit a `thinking` block BEFORE
       # the JSON text; if max_tokens is too small, all tokens go to thinking,
       # the JSON never starts and the run fails with raw_len=0 (observed live).
       # 8192 covers reasoning + full grading JSON for multi-page PDF answers.
       - DEFAULT_MAX_TOKENS=8192
+      # Exam-rubric extraction (POST /extract): the whole grading key comes
+      # back as ONE JSON document, so it needs a much larger output budget
+      # than a single grading run.
+      - EXTRACTION_MAX_TOKENS=16384
+      - EXTRACT_MAX_PAGES=20
       # MUST match FileStorage__RootPath of the api service below:
       # the API sends absolute image paths to Python, so both containers
       # need the identical shared volume mounted at the same path.

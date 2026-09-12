@@ -3,21 +3,26 @@
 export interface ExamDto {
   id: string;
   name: string;
-  year: number;
+  /** ISO date string (YYYY-MM-DD) — the exam's date, day precision. */
+  examDate: string;
   description?: string | null;
   createdAt: string;
   createdByName: string;
+  rubricFileName?: string | null;
+  rubricFileContentType?: string | null;
 }
 
 export interface CreateExamRequest {
   name: string;
-  year: number;
+  /** ISO date string (YYYY-MM-DD). */
+  examDate: string;
   description?: string | null;
 }
 
 export interface UpdateExamRequest {
   name: string;
-  year: number;
+  /** ISO date string (YYYY-MM-DD). */
+  examDate: string;
   description?: string | null;
 }
 
@@ -27,7 +32,6 @@ export interface QuestionDto {
   number: number;
   text: string;
   maxScore: number;
-  rubricText?: string | null;
   fileName?: string | null;
   contentType?: string | null;
 }
@@ -37,7 +41,6 @@ export interface CreateQuestionRequest {
   number: number;
   text: string;
   maxScore: number;
-  rubricText?: string | null;
 }
 
 export interface RubricCriterionDto {
@@ -54,14 +57,57 @@ export interface RubricDto {
   isActive: boolean;
   createdAt: string;
   totalMaxScore: number;
-  fileName?: string | null;
-  contentType?: string | null;
   criteria: RubricCriterionDto[];
 }
 
 export interface CreateRubricRequest {
   questionId: string;
   criteria: { criterionId: string; description: string; maxScore: number }[];
+}
+
+// ── Exam-wide rubric extraction (AI) ─────────────────────────────────────────
+
+export interface ExtractedCriterion {
+  criterionId: string;
+  description: string;
+  maxScore: number;
+}
+
+export interface ExtractedQuestion {
+  number: number;
+  text: string;
+  maxScore: number;
+  criteria: ExtractedCriterion[];
+}
+
+/** POST /api/exams/{id}/extraction/preview response — editable, saves nothing. */
+export interface ExtractionPreview {
+  examId: string;
+  fileName?: string | null;
+  contentType?: string | null;
+  questions: ExtractedQuestion[];
+  warnings: string[];
+  provider: string;
+  modelName: string;
+  inputTokens: number;
+  outputTokens: number;
+  latencyMs: number;
+  estimatedCostUsd: number;
+}
+
+export interface ApplyExtractionQuestion {
+  number: number;
+  text: string;
+  maxScore: number;
+  criteria: ExtractedCriterion[];
+}
+
+/** POST /api/exams/{id}/extraction/apply response. */
+export interface ApplyExtractionResult {
+  createdQuestions: number;
+  updatedQuestions: number;
+  rubricsCreated: number;
+  questionsUntouched: number;
 }
 
 export interface StudentDto {
@@ -185,7 +231,6 @@ export interface GradeRunRequest {
   answerId: string;
   temperature?: number;
   promptVersion?: string;
-  provider?: string | null;
   runs?: number;
 }
 

@@ -148,19 +148,24 @@ OpenAPI JSON available at `/openapi/v1.json` in Development.
 | POST | `/` | body `CreateExamRequest{name, year, description?}` + `X-User-Id` header → 201 `ExamDto` |
 | PUT | `/{id}` | body `UpdateExamRequest{name, year, description?}` → `ExamDto` |
 | DELETE | `/{id}` | → 204 |
+| POST | `/{id}/rubric/file` | Teacher only — exam-wide rubric file (grading key), multipart |
+| GET/DELETE | `/{id}/rubric/file` | download / delete the exam rubric file (extract-source only) |
+| POST | `/{id}/extraction/preview` | Teacher only — AI extracts all questions+criteria from the rubric file → preview DTO (saves nothing) |
+| POST | `/{id}/extraction/apply` | Teacher only — upsert confirmed preview rows by question number (never deletes) |
 
 ```jsonc // ExamDto
 { "id":"guid", "name":"Microeconomics Final", "year":2026,
-  "description":"...", "createdAt":"...", "createdByName":"Dr. X" }
+  "description":"...", "createdAt":"...", "createdByName":"Dr. X",
+  "rubricFileName":"key.pdf", "rubricFileContentType":"application/pdf" }
 ```
 
 ### Questions & Rubrics — `/api/questions`
 | Method | Route | Body / Notes |
 |---|---|---|
-| GET | `/{id}` | → `QuestionDto{id, examId, number, text, maxScore, rubricText?}` |
+| GET | `/{id}` | → `QuestionDto{id, examId, number, text, maxScore, fileName?, contentType?}` |
 | GET | `/by-exam/{examId}` | → `QuestionDto[]` |
-| POST | `/` | `CreateQuestionRequest{examId, number, text, maxScore, rubricText?}` → 201 |
-| PUT | `/{id}` | `{text?, maxScore?, rubricText?}` |
+| POST | `/` | `CreateQuestionRequest{examId, number, text, maxScore}` → 201 |
+| PUT | `/{id}` | `{text?, maxScore?}` |
 | DELETE | `/{id}` | → 204 |
 | GET | `/{id}/rubric` | active `RubricDto` |
 | POST | `/{id}/rubrics` | `CreateRubricRequest{questionId, criteria:[{criterionId, description, maxScore}]}` + header → creates NEW active version → 201 |

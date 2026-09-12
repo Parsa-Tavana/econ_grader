@@ -32,7 +32,7 @@ public sealed class ExamService : IExamService
     {
         return await _db.Exams
             .Include(x => x.CreatedBy)
-            .OrderByDescending(x => x.Year).ThenBy(x => x.Name)
+            .OrderByDescending(x => x.ExamDate).ThenBy(x => x.Name)
             .Select(e => Map(e))
             .ToListAsync(ct);
     }
@@ -41,10 +41,10 @@ public sealed class ExamService : IExamService
     {
         // createdByUserId comes from the validated JWT (never a header) — the
         // account must already exist; FK violation would indicate a bug upstream.
-        var exam = new Exam { Name = request.Name, Year = request.Year, Description = request.Description, CreatedByUserId = createdByUserId };
+        var exam = new Exam { Name = request.Name, ExamDate = request.ExamDate, Description = request.Description, CreatedByUserId = createdByUserId };
         _db.Exams.Add(exam);
         await _db.SaveChangesAsync(ct);
-        await _audit.WriteAsync("ExamCreated", "Exam", exam.Id, createdByUserId, new { exam.Name, exam.Year });
+        await _audit.WriteAsync("ExamCreated", "Exam", exam.Id, createdByUserId, new { exam.Name, exam.ExamDate });
         return await GetAsync(exam.Id, ct) ?? throw new NotFoundException(nameof(Exam), exam.Id);
     }
 
@@ -53,10 +53,10 @@ public sealed class ExamService : IExamService
         var exam = await _db.Exams.FindAsync([id], ct);
         if (exam is null) return null;
         exam.Name = request.Name;
-        exam.Year = request.Year;
+        exam.ExamDate = request.ExamDate;
         exam.Description = request.Description;
         await _db.SaveChangesAsync(ct);
-        await _audit.WriteAsync("ExamUpdated", "Exam", exam.Id, null, new { exam.Name, exam.Year });
+        await _audit.WriteAsync("ExamUpdated", "Exam", exam.Id, null, new { exam.Name, exam.ExamDate });
         return await GetAsync(exam.Id, ct);
     }
 
@@ -70,5 +70,7 @@ public sealed class ExamService : IExamService
         return true;
     }
 
-    private static ExamDto Map(Exam e) => new(e.Id, e.Name, e.Year, e.Description, e.CreatedAt, e.CreatedBy?.DisplayName ?? "unknown");
+    private static ExamDto Map(Exam e) => new(
+        e.Id, e.Name, e.ExamDate, e.Description, e.CreatedAt, e.CreatedBy?.DisplayName ?? "unknown",
+        RubricFileName: e.RubricFileName, RubricFileContentType: e.RubricFileContentType);
 }

@@ -2,7 +2,7 @@
 
 Every concrete grader must implement `grade()` and return a GradingResult.
 Nothing outside this interface (API layer, .NET app, UI) may call an
-Anthropic/Google/OpenAI SDK directly.
+OpenAI-compatible gateway directly.
 """
 from __future__ import annotations
 
@@ -54,6 +54,22 @@ class GradingResult:
     error_kind: Optional[str] = None
 
 
+@dataclass
+class ExtractionResult:
+    """Normalized result of an exam-rubric extraction call."""
+    provider: str
+    model_name: str
+    model_version: Optional[str]
+    prompt_version: str
+    raw_response: str = ""
+    parsed: Optional[dict[str, Any]] = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    latency_ms: int = 0
+    error: Optional[str] = None
+    error_kind: Optional[str] = None
+
+
 class IVisionGrader(ABC):
     """Abstract base for all vision graders. Implementations MUST NOT leak
     teacher scores or rubric internals beyond what's in the prompt.
@@ -62,10 +78,14 @@ class IVisionGrader(ABC):
     app.attachments (PDFs rendered to page PNGs, correct MIME types).
     `question_text` is the FULL question statement: the typed متن سؤال merged
     with any extracted question-document text. `extra_text` carries extracted
-    student-answer document text; `rubric_text`/`rubric_images` carry the
-    uploaded rubric document (text extraction / rendered pages) which must be
-    shown as rubric material, not as part of the question.
+    student-answer document text.
     """
+
+    #: Identity of the concrete slot — set by every subclass __init__ and
+    #: surfaced by GET /health so operators can see the ACTIVE model, not the
+    #: legacy MODEL_NAME fallback.
+    provider_label: str = "unknown"
+    model_name: str = "unknown"
 
     @abstractmethod
     def grade(
@@ -79,13 +99,27 @@ class IVisionGrader(ABC):
         temperature: float,
         prompt_version: str,
         extra_text: str = "",
-        rubric_text: str = "",
-        rubric_images: list[tuple[bytes, str]] | None = None,
-        document_only_rubric: bool = False,
     ) -> GradingResult:
         """Grade one student answer against one question + rubric.
 
         rubric: {"criteria": [{"id": "1a", "description": "...", "max_score": 2}, ...]}
         Returns GradingResult with ai_score in [0, max_score].
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def extract(
+        self,
+        *,
+        document_text: str,
+        document_images: list[tuple[bytes, str]],
+        document_name: str,
+        temperature: float,
+        prompt_version: str,
+    ) -> ExtractionResult:
+        """Extract all questions + rubric criteria from one exam-wide rubric
+        document (the grading key). document_text is the extracted document
+        text (DOCX/XLSX); document_images are rendered pages (PDF/PNG/JPG).
+        Returns ExtractionResult with `parsed` = raw model JSON or None.
         """
         raise NotImplementedError

@@ -13,6 +13,17 @@ public interface IGradingClient
         CancellationToken cancellationToken = default
     );
 
+    /// <summary>
+    /// Ask the Python service to extract all questions + rubric criteria from
+    /// ONE exam-wide rubric document (absolute path on the shared storage).
+    /// Saves nothing — the caller presents the result as an editable preview.
+    /// </summary>
+    Task<ExtractionServiceResponse> ExtractAsync(
+        string absoluteFilePath,
+        string fileName,
+        CancellationToken cancellationToken = default
+    );
+
     Task<TEvaluationResult?> EvaluateAsync(
         IEnumerable<(decimal TeacherScore, decimal AiScore)> runs,
         CancellationToken cancellationToken = default

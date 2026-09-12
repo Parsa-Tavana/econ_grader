@@ -157,6 +157,7 @@ try
     builder.Services.AddScoped<IQuestionService, QuestionService>();
     builder.Services.AddScoped<IAnswerService, AnswerService>();
     builder.Services.AddScoped<IGradingOrchestrationService, GradingOrchestrationService>();
+    builder.Services.AddScoped<IExamExtractionService, ExamExtractionService>();
     builder.Services.AddScoped<ITeacherReviewService, TeacherReviewService>();
     builder.Services.AddScoped<EvaluationService>();
 

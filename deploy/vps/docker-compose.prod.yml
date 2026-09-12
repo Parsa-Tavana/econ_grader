@@ -64,14 +64,18 @@ services:
       dockerfile: ../Dockerfile.grading
     container_name: econgrader-grading
     environment:
-      # Production uses the DIRECT Anthropic API. The 9router override lives
-      # only in the gitignored docker-compose.override.yml on the dev machine.
-      - MODEL_PROVIDER=claude
-      - MODEL_NAME=claude-sonnet-4-5
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?Set ANTHROPIC_API_KEY in .env}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
-      - QWEN_BASE_URL=http://localhost:8000/v1
-      - QWEN_API_KEY=not-needed
+      # Which slot grades: glm (default) | gpt — set in .env (MODEL_PROVIDER).
+      - MODEL_PROVIDER=${MODEL_PROVIDER:-glm}
+      # Defaults baked in so model/base-url can be changed from .env without a
+      # rebuild — edit .env and `up -d grading` to apply.
+      - GLM_BASE_URL=${GLM_BASE_URL:-https://api.arvancloudai.ir/v1}
+      - GLM_API_KEY=${GLM_API_KEY:?Set GLM_API_KEY in .env}
+      - GLM_MODEL=${GLM_MODEL:-GLM-5.3-Flash}
+      - GLM_AUTH_SCHEME=${GLM_AUTH_SCHEME:-Bearer}
+      - GPT_BASE_URL=${GPT_BASE_URL:-}
+      - GPT_API_KEY=${GPT_API_KEY:-}
+      - GPT_MODEL=${GPT_MODEL:-GPT-5.6-Sol}
+      - GPT_AUTH_SCHEME=apikey
       - DEFAULT_TEMPERATURE=0.0
       # Headroom for thinking-style models (see root docker-compose.yml note).
       - DEFAULT_MAX_TOKENS=8192

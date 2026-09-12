@@ -124,8 +124,19 @@ namespace EconGrader.Web.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<int>("Year")
-                        .HasColumnType("int");
+                    b.Property<string>("RubricFileContentType")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("RubricFileName")
+                        .HasMaxLength(260)
+                        .HasColumnType("nvarchar(260)");
+
+                    b.Property<string>("RubricFileStorageKey")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateOnly>("ExamDate")
+                        .HasColumnType("date");
 
                     b.HasKey("Id");
 
@@ -299,9 +310,6 @@ namespace EconGrader.Web.Migrations
                     b.Property<int>("Number")
                         .HasColumnType("int");
 
-                    b.Property<string>("RubricText")
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<string>("Text")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -320,22 +328,11 @@ namespace EconGrader.Web.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<string>("ContentType")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
                     b.Property<Guid>("CreatedByUserId")
                         .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("FileName")
-                        .HasMaxLength(260)
-                        .HasColumnType("nvarchar(260)");
-
-                    b.Property<string>("FileStorageKey")
-                        .HasColumnType("nvarchar(max)");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");

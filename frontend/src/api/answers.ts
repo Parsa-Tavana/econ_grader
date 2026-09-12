@@ -27,9 +27,6 @@ export async function uploadAnswer(
   });
   return data;
 }
-export function getAnswerImageUrl(answerId: string): string {
-  return `/api/answers/${answerId}/image`;
-}
 export async function setTeacherScore(answerId: string, score: number, teacher2Score?: number): Promise<AnswerDto> {
   const { data } = await api.put<AnswerDto>(`/answers/${answerId}/teacher-score`, { score, teacher2Score });
   return data;
