@@ -103,6 +103,7 @@ const en = {
     editExam: "Edit exam",
     examName: "Exam name",
     year: "Year",
+    examDate: "Exam date",
     description: "Description",
     createdBy: "Created by",
     questionsCount: "Questions",
@@ -158,6 +159,9 @@ const en = {
       "Add your first question, then define its grading rubric.",
     startGrading: "Start grading",
     textPlaceholder: "Write the full question text here...",
+    textOrFileHint: "Type the text or upload the question paper file — at least one is required.",
+    textOrFileRequired: "Enter the question text or upload a question file — at least one is required.",
+    fileOnlyPlaceholder: "(Question statement in attached file)",
     deleteWarning:
       "The question and all related answers and runs will be deleted.",
   },

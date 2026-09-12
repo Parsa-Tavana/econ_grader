@@ -3,7 +3,8 @@
 export interface ExamDto {
   id: string;
   name: string;
-  year: number;
+  /** ISO date string (YYYY-MM-DD) — the exam's date, day precision. */
+  examDate: string;
   description?: string | null;
   createdAt: string;
   createdByName: string;
@@ -13,13 +14,15 @@ export interface ExamDto {
 
 export interface CreateExamRequest {
   name: string;
-  year: number;
+  /** ISO date string (YYYY-MM-DD). */
+  examDate: string;
   description?: string | null;
 }
 
 export interface UpdateExamRequest {
   name: string;
-  year: number;
+  /** ISO date string (YYYY-MM-DD). */
+  examDate: string;
   description?: string | null;
 }
 

@@ -4,7 +4,8 @@ public class Exam
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = null!;
-    public int Year { get; set; }
+    /// <summary>The exam's date (day precision) — shown on cards and used for sorting.</summary>
+    public DateOnly ExamDate { get; set; }
     public string? Description { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public Guid CreatedByUserId { get; set; }

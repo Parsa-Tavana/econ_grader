@@ -18,7 +18,7 @@ import {
   friendlyError,
 } from "../components/ui";
 import { Stat } from "../components/common";
-import { formatNumber, formatScore, timeAgo } from "../utils/format";
+import { formatNumber, formatScore, formatDate, timeAgo } from "../utils/format";
 import { currentLang } from "../hooks/useLang";
 
 export default function DashboardPage() {
@@ -96,7 +96,7 @@ export default function DashboardPage() {
                       <div>
                         <p className="text-sm font-medium text-zinc-800">{e.name}</p>
                         <p className="text-[11px] text-zinc-400">
-                          {formatNumber(e.year, lang)} · {timeAgo(e.createdAt, lang)}
+                          {formatDate(e.examDate, lang)} · {timeAgo(e.createdAt, lang)}
                         </p>
                       </div>
                     </div>

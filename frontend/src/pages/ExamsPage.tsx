@@ -20,7 +20,7 @@ import {
   friendlyError,
 } from "../components/ui";
 import { ACCEPTED_TYPES } from "../components/FileAttachment";
-import { formatNumber, timeAgo } from "../utils/format";
+import { formatDate, timeAgo } from "../utils/format";
 import { currentLang } from "../hooks/useLang";
 import { useToast } from "../hooks/useToast";
 import { getAuthUser } from "../api/auth";
@@ -28,14 +28,15 @@ import { hasRole } from "../utils/roles";
 
 interface ExamForm {
   name: string;
-  year: number;
+  /** ISO date (YYYY-MM-DD) — native date input value. */
+  examDate: string;
   description: string;
   rubricFile: File | null;
 }
 
 const emptyForm = (): ExamForm => ({
   name: "",
-  year: new Date().getFullYear(),
+  examDate: new Date().toISOString().slice(0, 10),
   description: "",
   rubricFile: null,
 });
@@ -64,7 +65,7 @@ export default function ExamsPage() {
     mutationFn: async () => {
       const exam = await createExam({
         name: form.name.trim(),
-        year: form.year,
+        examDate: form.examDate,
         description: form.description.trim() || null,
       });
       if (form.rubricFile) await uploadExamRubricFile(exam.id, form.rubricFile);
@@ -83,7 +84,7 @@ export default function ExamsPage() {
     mutationFn: () =>
       updateExam(editingId!, {
         name: form.name.trim(),
-        year: form.year,
+        examDate: form.examDate,
         description: form.description.trim() || null,
       }),
     onSuccess: () => {
@@ -115,7 +116,7 @@ export default function ExamsPage() {
     if (!e) return;
     setForm({
       name: e.name,
-      year: e.year,
+      examDate: e.examDate,
       description: e.description ?? "",
       rubricFile: null,
     });
@@ -162,7 +163,7 @@ export default function ExamsPage() {
                 <Link to={`/exams/${e.id}`} className="font-semibold text-zinc-900 hover:text-primary-700">
                   {e.name}
                 </Link>
-                <Badge tone="zinc">{formatNumber(e.year, lang)}</Badge>
+                <Badge tone="zinc">{formatDate(e.examDate, lang)}</Badge>
               </div>
               <p className="mb-3 line-clamp-2 min-h-[2rem] text-sm text-zinc-500">
                 {e.description || "—"}
@@ -217,14 +218,12 @@ export default function ExamsPage() {
                 required
               />
             </Field>
-            <Field label={t("exams.year")} required htmlFor="exam-year">
+            <Field label={t("exams.examDate")} required htmlFor="exam-date">
               <Input
-                id="exam-year"
-                type="number"
-                min={1900}
-                max={2200}
-                value={form.year}
-                onChange={(e) => setForm({ ...form, year: Number(e.target.value) })}
+                id="exam-date"
+                type="date"
+                value={form.examDate}
+                onChange={(e) => setForm({ ...form, examDate: e.target.value })}
                 required
               />
             </Field>

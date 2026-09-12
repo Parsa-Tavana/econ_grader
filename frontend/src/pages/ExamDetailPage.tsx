@@ -33,7 +33,7 @@ import {
 import { listAnswersByQuestion, uploadAnswer } from "../api/answers";
 import { listStudents, createStudent } from "../api/students";
 import { apiErrorMessage } from "../api/client";
-import { FileAttachment } from "../components/FileAttachment";
+import { FileAttachment, ACCEPTED_TYPES } from "../components/FileAttachment";
 import { ExtractionPreviewDialog } from "../components/ExtractionPreviewDialog";
 import {
   PageHeader,
@@ -59,12 +59,15 @@ interface QuestionForm {
   number: number;
   text: string;
   maxScore: number;
+  /** Optional question paper file — alternative to typing the text. */
+  file: File | null;
 }
 
 const emptyQuestion = (): QuestionForm => ({
   number: 1,
   text: "",
   maxScore: 20,
+  file: null,
 });
 
 export default function ExamDetailPage() {
@@ -145,25 +148,30 @@ export default function ExamDetailPage() {
   }
 
   function openEditQuestion(q: QuestionDto) {
-    setQForm({ number: q.number, text: q.text, maxScore: q.maxScore });
+    setQForm({ number: q.number, text: q.text, maxScore: q.maxScore, file: null });
     setEditingQId(q.id);
     setQDialogOpen(true);
   }
 
   const saveQuestionMut = useMutation({
+    // The DB requires question text; when only a file is given, a placeholder
+    // stands in for it (the card shows the file attachment next to it).
     mutationFn: async () => {
+      const text = qForm.text.trim() || t("questions.fileOnlyPlaceholder");
       if (editingQId) {
-        await updateQuestion(editingQId, {
-          text: qForm.text.trim(),
+        const updated = await updateQuestion(editingQId, {
+          text,
           maxScore: qForm.maxScore,
         });
+        if (qForm.file) await uploadQuestionFile(updated.id, qForm.file);
       } else {
-        await createQuestion({
+        const created = await createQuestion({
           examId,
           number: qForm.number,
-          text: qForm.text.trim(),
+          text,
           maxScore: qForm.maxScore,
         });
+        if (qForm.file) await uploadQuestionFile(created.id, qForm.file);
       }
     },
     onSuccess: () => {
@@ -289,7 +297,8 @@ export default function ExamDetailPage() {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (!qForm.text.trim()) return;
+            // At least one of text / file must be provided.
+            if (!qForm.text.trim() && !qForm.file) return;
             saveQuestionMut.mutate();
           }}
         >
@@ -317,21 +326,46 @@ export default function ExamDetailPage() {
             </Field>
           </div>
           <div className="mt-3">
-            <Field label={t("questions.text")} required htmlFor="q-text">
+            <Field
+              label={`${t("questions.text")} (${t("common.optional")})`}
+              hint={t("questions.textOrFileHint")}
+              htmlFor="q-text"
+            >
               <Textarea
                 id="q-text"
                 rows={3}
                 value={qForm.text}
                 onChange={(e) => setQForm({ ...qForm, text: e.target.value })}
-                required
+                placeholder={t("questions.textPlaceholder")}
               />
             </Field>
           </div>
+          <div className="mt-3">
+            <Field
+              label={`${t("files.questionLabel")} (${t("common.optional")})`}
+              hint={t("questions.textOrFileHint")}
+              htmlFor="q-file"
+            >
+              <Input
+                id="q-file"
+                type="file"
+                accept={ACCEPTED_TYPES}
+                onChange={(e) => setQForm({ ...qForm, file: e.target.files?.[0] ?? null })}
+              />
+            </Field>
+          </div>
+          {!qForm.text.trim() && !qForm.file ? (
+            <p className="mt-2 text-xs text-amber-600">{t("questions.textOrFileRequired")}</p>
+          ) : null}
           <div className="mt-5 flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={() => setQDialogOpen(false)}>
               {t("common.cancel")}
             </Button>
-            <Button type="submit" loading={saveQuestionMut.isPending}>
+            <Button
+              type="submit"
+              loading={saveQuestionMut.isPending}
+              disabled={!qForm.text.trim() && !qForm.file}
+            >
               {t("common.save")}
             </Button>
           </div>
