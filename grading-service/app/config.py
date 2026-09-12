@@ -20,11 +20,15 @@ class Settings(BaseSettings):
     GLM_API_KEY: str = Field(default="not-needed")
     GLM_MODEL: str = Field(default="GLM-5.3-Flash")
     GLM_AUTH_SCHEME: str = Field(default="Bearer", description="Authorization header prefix: Bearer | apikey")
+    # Stream /chat/completions (SSE). Default on — gateways with idle timeouts
+    # (ArvanCloud cuts silent requests at ~60s) kill long vision calls.
+    GLM_STREAMING: bool = Field(default=True)
     # Second slot — GPT-5.6-Sol, reserved for future use (MODEL_PROVIDER=gpt).
     GPT_BASE_URL: str = Field(default="", description="GPT endpoint WITHOUT /chat/completions")
     GPT_API_KEY: str = Field(default="not-needed")
     GPT_MODEL: str = Field(default="GPT-5.6-Sol")
     GPT_AUTH_SCHEME: str = Field(default="apikey", description="Authorization header prefix: Bearer | apikey")
+    GPT_STREAMING: bool = Field(default=True)
     
     # Default grading parameters
     DEFAULT_TEMPERATURE: float = 0.0

@@ -16,4 +16,5 @@ class GlmVisionGrader(OpenAICompatibleGrader):
             api_key=settings.GLM_API_KEY,
             model=settings.GLM_MODEL or settings.MODEL_NAME,
             auth_scheme=settings.GLM_AUTH_SCHEME,
+            streaming=settings.GLM_STREAMING,
         )
