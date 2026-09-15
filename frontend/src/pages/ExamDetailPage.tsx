@@ -10,6 +10,7 @@ import {
   Upload,
   Layers,
   Sparkles,
+  Play,
 } from "lucide-react";
 import type { ApplyExtractionQuestion, QuestionDto } from "../types/models";
 import {
@@ -29,7 +30,11 @@ import {
   uploadQuestionFile,
   deleteQuestionFile,
   questionFileUrl,
+  uploadAnswerKey,
+  deleteAnswerKey,
+  answerKeyUrl,
 } from "../api/questions";
+import { bulkGrade } from "../api/grading";
 import { listAnswersByQuestion, uploadAnswer } from "../api/answers";
 import { listStudents, createStudent } from "../api/students";
 import { apiErrorMessage } from "../api/client";
@@ -451,6 +456,33 @@ function QuestionCard({
     await qc.invalidateQueries({ queryKey: ["questions", question.examId] });
   }
 
+  // ── پاسخنامه (model answer) — M3 management. Upload/replace/remove here;
+  // grading only consumes it when the exam's ground-truth gate is on (M4).
+  async function handleAnswerKeyFile(file: File) {
+    await uploadAnswerKey(question.id, file);
+    await qc.invalidateQueries({ queryKey: ["questions", question.examId] });
+    toast.success(t("answers.answerKeySaved"));
+  }
+  async function handleDeleteAnswerKey() {
+    await deleteAnswerKey(question.id);
+    await qc.invalidateQueries({ queryKey: ["questions", question.examId] });
+    toast.success(t("answers.answerKeyRemoved"));
+  }
+
+  // ── Grade-all (M3): enqueue one job per remaining answer of this question.
+  const bulkMut = useMutation({
+    mutationFn: () => bulkGrade({ examId: question.examId, questionId: question.id }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["answers", "question", question.id] });
+      toast.success(
+        res.enqueued > 0
+          ? t("queue.bulkEnqueued", { count: res.enqueued, skipped: res.skipped })
+          : t("queue.bulkNothing", { skipped: res.skipped })
+      );
+    },
+    onError: (e) => toast.error(friendlyError(apiErrorMessage(e), t)),
+  });
+
   return (
     <Card>
       <div className="mb-2 flex items-start justify-between gap-2">
@@ -482,6 +514,20 @@ function QuestionCard({
         />
       </div>
 
+      {/* پاسخنامه (model answer) — grading consumes it only when the exam's
+          ground-truth gate is on; chip shows its presence either way. */}
+      <div className="mb-3">
+        <FileAttachment
+          label={t("files.answerKeyLabel")}
+          fileName={question.answerKeyFileName ?? null}
+          contentType={question.answerKeyContentType ?? null}
+          fileUrl={question.answerKeyFileName ? answerKeyUrl(question.id) : null}
+          onUpload={handleAnswerKeyFile}
+          onDelete={handleDeleteAnswerKey}
+          canEdit={canManage}
+        />
+      </div>
+
       {rubricQ.data ? (
         <ul className="mb-3 space-y-1 rounded-lg bg-zinc-50 p-2.5 text-xs text-zinc-600">
           {rubricQ.data.criteria.map((c) => (
@@ -494,6 +540,18 @@ function QuestionCard({
       ) : null}
 
       <div className="flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-3">
+        {canManage ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            loading={bulkMut.isPending}
+            disabled={(answersQ.data?.length ?? 0) === 0}
+            onClick={() => bulkMut.mutate()}
+            title={t("queue.gradeAllHint")}
+          >
+            <Play size={13} /> {t("queue.gradeAll")}
+          </Button>
+        ) : null}
         {canManage ? (
           <label
             className={

@@ -32,6 +32,8 @@ from .cost import estimate_cost
 from .prompts.loader import list_prompt_versions, load_prompt
 from .evaluation import compute_metrics, aggregate_by_provider
 from .internal_auth import require_internal_key
+from .ingest import register_ingest_route
+from .split_header import register_split_route
 from . import telemetry
 
 logging.basicConfig(
@@ -62,6 +64,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# POST /ingest — upload-time render/normalize (M1). One conversion point:
+# the .NET layer calls this once per upload instead of /grade re-converting
+# per request.
+register_ingest_route(app)
+
+# POST /split-header — M6 bulk answer-sheet split: OCR the header band of
+# ingested page images. Pure OCR, zero AI tokens.
+register_split_route(app)
 
 
 def _log_request_response(req: dict, resp: GradeResponse | None, raw_text: str | None, latency_ms: int):

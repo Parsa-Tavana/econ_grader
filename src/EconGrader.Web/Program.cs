@@ -117,6 +117,17 @@ try
     builder.Services.Configure<LocalFileStorageOptions>(opts => opts.RootPath = fileStorageRoot);
     builder.Services.AddSingleton<IFileStorage, LocalFileStorage>();
 
+    // ── Content-addressed artifact store (M1) ────────────────────────────────
+    // Blobs keyed by SHA-256 under the same storage root; page images are
+    // rendered once at ingest and deduped by rendered content hash.
+    builder.Services.Configure<ArtifactStoreOptions>(opts =>
+    {
+        opts.MaxPages = builder.Configuration.GetValue<int?>("Ingest:MaxPages") ?? 20;
+        opts.RenderDpi = builder.Configuration.GetValue<int?>("Ingest:RenderDpi") ?? 150;
+        opts.JpegQuality = builder.Configuration.GetValue<int?>("Ingest:JpegQuality") ?? 85;
+    });
+    builder.Services.AddScoped<IArtifactStore, ArtifactStore>();
+
     // ── Audit logging (append-only, via EF) ─────────────────────────────────
     builder.Services.AddScoped<IAuditLogger, AuditLogger>();
 
@@ -160,6 +171,50 @@ try
     builder.Services.AddScoped<IExamExtractionService, ExamExtractionService>();
     builder.Services.AddScoped<ITeacherReviewService, TeacherReviewService>();
     builder.Services.AddScoped<EvaluationService>();
+    builder.Services.AddScoped<IGoldenSetService, GoldenSetService>();
+
+    // ── Ingest pipeline (M1): upload-time render/normalize ───────────────────
+    builder.Services.Configure<IngestOptions>(opts =>
+    {
+        opts.LeaseSeconds = builder.Configuration.GetValue<int?>("Ingest:LeaseSeconds") ?? 300;
+        // Which rendered format grading prefers (png200 default; jpeg150 after M4 A/B).
+        opts.PageFormat = (builder.Configuration.GetValue<string?>("Ingest:PageFormat") ?? "png200").Trim().ToLowerInvariant();
+    });
+    builder.Services.AddScoped<IIngestService, IngestService>();
+
+    // ── Grading job queue (M2): lease worker + global in-flight cap ──────────
+    // Grading:Mode=sync (default) keeps the old blocking endpoint; "queue"
+    // flips POST /grading/run to 202-enqueue. AppRole=worker (worker container)
+    // runs the lease loop; AppRole=api skips it.
+    builder.Services.Configure<GradingJobOptions>(opts =>
+    {
+        opts.MaxInFlight = builder.Configuration.GetValue<int?>("Grading:MaxInFlight") ?? 4;
+        opts.LeaseSeconds = builder.Configuration.GetValue<int?>("Grading:LeaseSeconds") ?? 600;
+        opts.PollIntervalSeconds = builder.Configuration.GetValue<int?>("Grading:PollIntervalSeconds") ?? 3;
+        opts.HeartbeatSeconds = builder.Configuration.GetValue<int?>("Grading:HeartbeatSeconds") ?? 60;
+        opts.MaxAttempts = builder.Configuration.GetValue<int?>("Grading:MaxAttempts") ?? 3;
+        // M5: optional per-ensemble-slot temperature step (default 0 → every
+        // slot at the requested temperature, exactly the old behavior).
+        opts.EnsembleStagger = builder.Configuration.GetValue<decimal?>("Grading:EnsembleStagger") ?? 0m;
+    });
+    builder.Services.AddScoped<IGradingJobService, GradingJobService>();
+
+    // ── Bulk answer-sheet split (M6): OCR-only queue on the worker ──────────
+    builder.Services.Configure<SplitOptions>(opts =>
+    {
+        opts.LeaseSeconds = builder.Configuration.GetValue<int?>("Split:LeaseSeconds") ?? 900;
+        opts.HeaderBandPct = builder.Configuration.GetValue<decimal?>("Split:HeaderBandPct") ?? 12m;
+        opts.OcrConfidenceThreshold = builder.Configuration.GetValue<decimal?>("Split:OcrConfidenceThreshold") ?? 0.8m;
+        opts.MaxPages = builder.Configuration.GetValue<int?>("Split:MaxPages") ?? 400;
+        opts.IngestWindowSize = builder.Configuration.GetValue<int?>("Split:IngestWindowSize") ?? 20;
+        opts.OcrChunkSize = builder.Configuration.GetValue<int?>("Split:OcrChunkSize") ?? 100;
+        opts.VisionFallbackEnabled = builder.Configuration.GetValue<bool?>("Split:VisionFallbackEnabled") ?? false;
+    });
+    builder.Services.AddScoped<ISplitService, SplitService>();
+
+    var appRole = (builder.Configuration["AppRole"] ?? "api").Trim().ToLowerInvariant();
+    if (appRole == "worker")
+        builder.Services.AddHostedService<BulkSplitWorkerHostedService>();
 
     // ── Authentication: bearer JWT (identity NEVER from headers) ─────────────
     // Fail-fast on unsafe keys BEFORE any request can be served:

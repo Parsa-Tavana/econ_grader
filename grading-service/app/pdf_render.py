@@ -48,12 +48,15 @@ def render_pdf_to_png_bytes(
         raise RuntimeError(f"PDF render failure: {exc}") from exc
 
     if page_numbers:
-        # Validate page numbers
-        if max(page_numbers) > len(pages) or min(page_numbers) < 1:
-            raise ValueError(
-                f"Page numbers {page_numbers} out of range for {len(pages)}-page PDF"
-            )
-        pages = [pages[i - 1] for i in page_numbers]
+        # page_numbers are SOURCE-document positions; convert_from_path
+        # (with first_page/last_page) returned the rendered window that
+        # starts at page_numbers[0]. Map by position, clamping the request
+        # to what poppler actually rendered (a range past the document end
+        # comes back short, never raising).
+        first = page_numbers[0]
+        if len(pages) < page_numbers[-1] - first + 1:
+            page_numbers = [p for p in page_numbers if p - first < len(pages)]
+        pages = [pages[p - first] for p in page_numbers]
 
     out = []
     for i, page in enumerate(pages):
@@ -63,6 +66,23 @@ def render_pdf_to_png_bytes(
         out.append(buf.getvalue())
         logger.debug("Rendered page %d of %s -> %d bytes", i + 1, pdf_path, len(out[-1]))
     return out
+
+
+def pdf_page_count(pdf_path: str) -> int:
+    """Total pages in a PDF via poppler's pdfinfo (cheap — no rendering).
+
+    Raises RuntimeError when poppler cannot read the file, mirroring the
+    render path's error contract.
+    """
+    if not PDF2IMAGE_AVAILABLE:
+        raise RuntimeError("pdf2image is not installed — cannot inspect PDFs")
+    try:
+        from pdf2image import pdfinfo_from_path
+        info = pdfinfo_from_path(pdf_path)
+        return int(info.get("Pages", 0))
+    except Exception as exc:
+        logger.exception("PDF page-count failed for %s", pdf_path)
+        raise RuntimeError(f"PDF render failure: {exc}") from exc
 
 
 def render_pdf_pages_to_disk(

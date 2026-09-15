@@ -7,7 +7,10 @@ public record QuestionDto(
     string Text,
     decimal MaxScore,
     string? FileName = null,
-    string? ContentType = null
+    string? ContentType = null,
+    /// <summary>پاسخنامه file name when one is attached (null = none).</summary>
+    string? AnswerKeyFileName = null,
+    string? AnswerKeyContentType = null
 );
 
 public record CreateQuestionRequest(

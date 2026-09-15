@@ -123,7 +123,8 @@ public sealed class QuestionService : IQuestionService
 
     private static QuestionDto Map(Question q) =>
         new(q.Id, q.ExamId, q.Number, q.Text, q.MaxScore,
-            FileName: q.FileName, ContentType: q.ContentType);
+            FileName: q.FileName, ContentType: q.ContentType,
+            AnswerKeyFileName: q.AnswerKeyFileName, AnswerKeyContentType: q.AnswerKeyContentType);
 
     private static RubricDto MapRubric(Rubric r) => new(
         r.Id, r.QuestionId, r.Version, r.IsActive, r.CreatedAt,

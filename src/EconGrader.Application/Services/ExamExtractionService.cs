@@ -4,6 +4,7 @@ using EconGrader.Application.Interfaces;
 using EconGrader.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace EconGrader.Application.Services;
 
@@ -29,6 +30,7 @@ public sealed class ExamExtractionService : IExamExtractionService
     private readonly IGradingClient _gradingClient;
     private readonly IFileStorage _storage;
     private readonly IAuditLogger _audit;
+    private readonly IOptions<IngestOptions> _ingestOptions;
     private readonly ILogger<ExamExtractionService> _logger;
 
     public ExamExtractionService(
@@ -36,12 +38,14 @@ public sealed class ExamExtractionService : IExamExtractionService
         IGradingClient gradingClient,
         IFileStorage storage,
         IAuditLogger audit,
+        IOptions<IngestOptions> ingestOptions,
         ILogger<ExamExtractionService> logger)
     {
         _db = db;
         _gradingClient = gradingClient;
         _storage = storage;
         _audit = audit;
+        _ingestOptions = ingestOptions;
         _logger = logger;
     }
 
@@ -210,6 +214,20 @@ public sealed class ExamExtractionService : IExamExtractionService
                 "EXTRACTION_CONFLICT");
         }
 
+        // ── Item banking (M1): bank the exam key's rendered pages onto questions ──
+        // Questions with no explicit page pick (page-picker UI arrives in M3)
+        // default to "all exam-key pages" — the same material the legacy
+        // whole-file path already sent as question images. Best-effort: when
+        // the rubric file wasn't ingested, grading keeps using the whole file.
+        try
+        {
+            await BankExamKeyPagesAsync(exam, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "QuestionAsset banking failed for exam {ExamId} — grading falls back to whole-file", examId);
+        }
+
         // Post-save audits (each its own save; the apply itself is already durable).
         foreach (var q in newQuestions)
             await _audit.WriteAsync("QuestionCreated", "Question", q.Id, userId, new { q.ExamId, q.Number });
@@ -225,6 +243,55 @@ public sealed class ExamExtractionService : IExamExtractionService
         });
 
         return new ApplyExtractionResultDto(created, updated, rubricsCreated, untouched);
+    }
+
+    /// <summary>Item banking (M1): when the exam's rubric file (grading key)
+    /// has ingested pages, link them to every question of this exam as
+    /// QuestionAsset rows. Defaults to ALL pages for every question — the
+    /// page-picker (M3) narrows this later; re-apply replaces previous banked
+    /// assets so re-extraction stays idempotent.</summary>
+    private async Task BankExamKeyPagesAsync(Exam exam, CancellationToken ct)
+    {
+        if (exam.RubricFileArtifactId is null) return;
+
+        var preferredFormat = _ingestOptions.Value.PageFormat;
+        var pages = await _db.Artifacts
+            .Where(a => a.Kind == "page" && a.Format == preferredFormat && a.ParentArtifactId == exam.RubricFileArtifactId)
+            .OrderBy(a => a.PageNumber ?? 0)
+            .ToListAsync(ct);
+        if (pages.Count == 0) return;
+
+        var questions = await _db.Questions
+            .Where(q => q.ExamId == exam.Id)
+            .ToListAsync(ct);
+        if (questions.Count == 0) return;
+
+        // Idempotent re-apply: drop the previous exam_key rows for this exam's
+        // questions, then re-link. Role filter keeps teacher page-picker picks
+        // (a different role, M3) intact.
+        var examQuestionIds = questions.Select(q => q.Id).ToList();
+        await _db.QuestionAssets
+            .Where(a => a.Role == "exam_key" && examQuestionIds.Contains(a.QuestionId))
+            .ExecuteDeleteAsync(ct);
+
+        var order = 0;
+        foreach (var page in pages)
+        {
+            foreach (var question in questions)
+            {
+                _db.QuestionAssets.Add(new QuestionAsset
+                {
+                    QuestionId = question.Id,
+                    ArtifactId = page.Id,
+                    SortOrder = order,
+                    Role = "exam_key",
+                });
+            }
+            order++;
+        }
+        await _db.SaveChangesAsync(ct);
+        _logger.LogInformation("Banked {Pages} exam-key pages onto {Questions} questions for exam {ExamId}",
+            pages.Count, questions.Count, exam.Id);
     }
 
     private static bool CriteriaMatch(Rubric active, IReadOnlyList<ApplyExtractionCriterionDto> incoming)

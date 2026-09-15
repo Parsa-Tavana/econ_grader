@@ -11,6 +11,7 @@ import {
   Settings,
   Users,
   Languages,
+  FileStack,
   Wifi,
   WifiOff,
   LogOut,
@@ -36,6 +37,8 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/exams", key: "nav.exams", icon: BookOpen },
   { to: "/students", key: "nav.students", icon: GraduationCap },
   { to: "/grading/queue", key: "nav.grading", icon: PenLine },
+  // M6 bulk split — teacher-only server-side ([Authorize(Roles="Teacher")]).
+  { to: "/grading/bulk", key: "nav.bulk", icon: FileStack, roles: ["Teacher"] },
   { to: "/evaluation", key: "nav.evaluation", icon: ChartLine },
   // Audit log + user management are admin-only server-side ([Authorize(Roles="Admin")]).
   { to: "/audit", key: "nav.audit", icon: ScrollText, roles: ["Admin"] },

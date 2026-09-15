@@ -10,6 +10,8 @@ export interface ExamDto {
   createdByName: string;
   rubricFileName?: string | null;
   rubricFileContentType?: string | null;
+  /** پاسخنامه-graded runs enabled for this exam (M1 gate, default off — M4 flips with evidence). */
+  groundTruthGradingEnabled?: boolean;
 }
 
 export interface CreateExamRequest {
@@ -34,6 +36,9 @@ export interface QuestionDto {
   maxScore: number;
   fileName?: string | null;
   contentType?: string | null;
+  /** پاسخنامه (model answer) file — M3 management UI. */
+  answerKeyFileName?: string | null;
+  answerKeyContentType?: string | null;
 }
 
 export interface CreateQuestionRequest {
@@ -122,6 +127,42 @@ export interface CreateStudentRequest {
   displayName?: string | null;
 }
 
+// ── M6 bulk answer-sheet split ──────────────────────────────────────────────
+
+export type BulkPageReviewStatus = "auto" | "needs_review" | "unmatched" | "confirmed" | "skipped";
+
+export interface BulkPageDto {
+  id: string;
+  pageNumber: number;
+  pageArtifactId: string;
+  rawOcrId?: string | null;
+  ocrConfidence: number;
+  matchedStudentId?: string | null;
+  matchedStudentExternalId?: string | null;
+  matchedStudentDisplayName?: string | null;
+  reviewStatus: BulkPageReviewStatus;
+  sortInStack: number;
+}
+
+export interface BulkBatchDto {
+  id: string;
+  questionId: string;
+  sourceArtifactId: string;
+  sourceFileName?: string | null;
+  status: "splitting" | "ready_for_review" | "applied" | "failed";
+  totalPages: number;
+  error?: string | null;
+  createdAt: string;
+  pages: BulkPageDto[];
+}
+
+export interface BulkApplySummary {
+  students: number;
+  pagesApplied: number;
+  pagesSkipped: number;
+  pagesUnassigned: number;
+}
+
 export type ReviewAction = "Accept" | "Override";
 
 export interface GradingRunSummaryDto {
@@ -135,6 +176,7 @@ export interface GradingRunSummaryDto {
   isValid: boolean;
   error?: string | null;
   createdAt: string;
+  inputArtifactsJson?: string | null;
 }
 
 export interface AnswerDto {
@@ -175,6 +217,8 @@ export interface GradingRun {
   estimatedCost: number;
   error?: string | null;
   createdAt: string;
+  /** M1/M4 lineage — the artifacts this run consumed (see parseLineage). */
+  inputArtifactsJson?: string | null;
 }
 
 export interface CriterionScore {
@@ -217,6 +261,93 @@ export function parseCriteriaScores(json?: string | null): CriterionScore[] {
   } catch {
     return [];
   }
+}
+
+/** One lineage entry from GradingRun.inputArtifactsJson (M1/M4). */
+export interface LineageEntry {
+  kind: "page" | "legacy_file";
+  role: "answer" | "question" | "model_answer";
+  sha256?: string | null;
+  page?: number | null;
+  storage_key?: string | null;
+}
+
+/**
+ * Parse a run's InputArtifactsJson — the exact artifacts the AI consumed.
+ * Tolerant: null/old runs yield [], a corrupt row yields [] (one bad row must
+ * never blank the run timeline).
+ */
+export function parseLineage(json?: string | null): LineageEntry[] {
+  if (!json) return [];
+  try {
+    const parsed: unknown = JSON.parse(json);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((e): e is Record<string, unknown> => e != null && typeof e === "object")
+      .map((e) => {
+        const kind = e.kind === "page" ? "page" : "legacy_file";
+        const role =
+          e.role === "question"
+            ? "question"
+            : e.role === "model_answer"
+              ? "model_answer"
+              : "answer";
+        const page = Number(e.page);
+        return {
+          kind,
+          role,
+          sha256: typeof e.sha256 === "string" ? e.sha256 : null,
+          page: Number.isFinite(page) ? page : null,
+          storage_key: typeof e.storage_key === "string" ? e.storage_key : null,
+        } satisfies LineageEntry;
+      });
+  } catch {
+    return [];
+  }
+}
+
+/** M4 golden-set harness — request body for POST /api/evaluation/golden-set. */
+export interface GoldenSetRequestDto {
+  questionId: string;
+  temperature?: number;
+  promptVersion?: string;
+  maxAnswers?: number;
+  note?: string | null;
+}
+
+/** M4 golden-set harness — result of one gated A/B diff. */
+export interface GoldenSetResultDto {
+  evalRunId: string;
+  questionId: string;
+  baselineCount: number;
+  candidateCount: number;
+  baselineQwk?: number | null;
+  candidateQwk?: number | null;
+  qwkDelta?: number | null;
+  baselineMae?: number | null;
+  candidateMae?: number | null;
+  baselineExactAgreementPct?: number | null;
+  candidateExactAgreementPct?: number | null;
+  regressed: boolean;
+  verdict: string;
+}
+
+/** One row of GET /api/evaluation/golden-set/history. */
+export interface GoldenSetHistoryRow {
+  id: string;
+  questionId?: string | null;
+  configurationJson?: string | null;
+  baselineQwk?: number | null;
+  baselineMae?: number | null;
+  baselineExactAgreementPct?: number | null;
+  baselineCount: number;
+  candidateQwk?: number | null;
+  candidateMae?: number | null;
+  candidateExactAgreementPct?: number | null;
+  candidateCount: number;
+  qwkDelta?: number | null;
+  regressed: boolean;
+  createdAt: string;
 }
 
 /** POST /api/grading/run response */

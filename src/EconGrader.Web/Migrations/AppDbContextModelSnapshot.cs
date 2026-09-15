@@ -40,6 +40,9 @@ namespace EconGrader.Web.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid?>("OriginalArtifactId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("QuestionId")
                         .HasColumnType("uniqueidentifier");
 
@@ -57,12 +60,104 @@ namespace EconGrader.Web.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("OriginalArtifactId");
+
                     b.HasIndex("QuestionId");
 
                     b.HasIndex("StudentId", "QuestionId")
                         .IsUnique();
 
                     b.ToTable("Answers");
+                });
+
+            modelBuilder.Entity("EconGrader.Domain.Entities.AnswerPage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AnswerId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ArtifactId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Format")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ArtifactId");
+
+                    b.HasIndex("AnswerId", "Format", "SortOrder");
+
+                    b.ToTable("AnswerPages");
+                });
+
+            modelBuilder.Entity("EconGrader.Domain.Entities.Artifact", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<long>("Bytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Format")
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<int?>("Height")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<int?>("PageCount")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("PageNumber")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("ParentArtifactId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("TextContent")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("Width")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ParentArtifactId");
+
+                    b.HasIndex("StorageKey");
+
+                    b.HasIndex("Sha256", "Kind")
+                        .IsUnique();
+
+                    b.ToTable("Artifacts");
                 });
 
             modelBuilder.Entity("EconGrader.Domain.Entities.AuditLog", b =>
@@ -105,6 +200,184 @@ namespace EconGrader.Web.Migrations
                     b.ToTable("AuditLogs");
                 });
 
+            modelBuilder.Entity("EconGrader.Domain.Entities.BulkAnswerBatch", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ErrorKind")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<DateTime?>("FinishedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("LeaseToken")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime?>("LeaseUntil")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("QuestionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("SourceArtifactId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SourceContentType")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("SourceFileName")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("nvarchar(24)");
+
+                    b.Property<int>("TotalPages")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("SourceArtifactId");
+
+                    b.HasIndex("QuestionId", "SourceArtifactId")
+                        .IsUnique();
+
+                    b.HasIndex("Status", "LeaseUntil");
+
+                    b.ToTable("BulkAnswerBatches");
+                });
+
+            modelBuilder.Entity("EconGrader.Domain.Entities.BulkPageMapping", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("BatchId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("MatchedStudentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("OcrConfidence")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<Guid>("PageArtifactId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("PageNumber")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RawOcrId")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("ReviewStatus")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<int>("SortInStack")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MatchedStudentId");
+
+                    b.HasIndex("PageArtifactId");
+
+                    b.HasIndex("BatchId", "MatchedStudentId");
+
+                    b.HasIndex("BatchId", "PageNumber")
+                        .IsUnique();
+
+                    b.ToTable("BulkPageMappings");
+                });
+
+            modelBuilder.Entity("EconGrader.Domain.Entities.EvalRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("BaselineCount")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("BaselineExactAgreementPct")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("BaselineMae")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("BaselineQwk")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("CandidateCount")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("CandidateExactAgreementPct")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("CandidateMae")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("CandidateQwk")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("ConfigurationJson")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("DetailsJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("QuestionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("QwkDelta")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<bool>("Regressed")
+                        .HasColumnType("bit");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("QuestionId");
+
+                    b.ToTable("EvalRuns");
+                });
+
             modelBuilder.Entity("EconGrader.Domain.Entities.Exam", b =>
                 {
                     b.Property<Guid>("Id")
@@ -120,9 +393,18 @@ namespace EconGrader.Web.Migrations
                     b.Property<string>("Description")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<DateOnly>("ExamDate")
+                        .HasColumnType("date");
+
+                    b.Property<bool>("GroundTruthGradingEnabled")
+                        .HasColumnType("bit");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("RubricFileArtifactId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("RubricFileContentType")
                         .HasMaxLength(128)
@@ -135,12 +417,11 @@ namespace EconGrader.Web.Migrations
                     b.Property<string>("RubricFileStorageKey")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<DateOnly>("ExamDate")
-                        .HasColumnType("date");
-
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("RubricFileArtifactId");
 
                     b.ToTable("Exams");
                 });
@@ -161,6 +442,73 @@ namespace EconGrader.Web.Migrations
                     b.HasIndex("CorrectorUserId");
 
                     b.ToTable("ExamCorrectors");
+                });
+
+            modelBuilder.Entity("EconGrader.Domain.Entities.GradingJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AnswerId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("EnsembleIndex")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ErrorKind")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("FinishedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("GradingRunId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("LeaseToken")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("LeaseUntil")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("PromptVersion")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<decimal>("Temperature")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("GradingRunId");
+
+                    b.HasIndex("Status", "LeaseUntil");
+
+                    b.HasIndex("AnswerId", "Temperature", "PromptVersion", "EnsembleIndex")
+                        .IsUnique();
+
+                    b.ToTable("GradingJobs");
                 });
 
             modelBuilder.Entity("EconGrader.Domain.Entities.GradingRun", b =>
@@ -186,6 +534,9 @@ namespace EconGrader.Web.Migrations
 
                     b.Property<decimal>("EstimatedCost")
                         .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("InputArtifactsJson")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("InputTokens")
                         .HasColumnType("int");
@@ -247,6 +598,60 @@ namespace EconGrader.Web.Migrations
                     b.ToTable("GradingRuns");
                 });
 
+            modelBuilder.Entity("EconGrader.Domain.Entities.IngestJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ErrorKind")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<DateTime?>("FinishedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("LeaseToken")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime?>("LeaseUntil")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("OriginalArtifactId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OriginalArtifactId", "Status");
+
+                    b.HasIndex("Status", "LeaseUntil");
+
+                    b.ToTable("IngestJobs");
+                });
+
             modelBuilder.Entity("EconGrader.Domain.Entities.ModelConfig", b =>
                 {
                     b.Property<Guid>("Id")
@@ -287,6 +692,20 @@ namespace EconGrader.Web.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("AnswerKeyArtifactId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AnswerKeyContentType")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("AnswerKeyFileName")
+                        .HasMaxLength(260)
+                        .HasColumnType("nvarchar(260)");
+
+                    b.Property<string>("AnswerKeyStorageKey")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("ContentType")
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
@@ -295,6 +714,9 @@ namespace EconGrader.Web.Migrations
                         .HasColumnType("int");
 
                     b.Property<Guid>("ExamId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("FileArtifactId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("FileName")
@@ -316,10 +738,72 @@ namespace EconGrader.Web.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AnswerKeyArtifactId");
+
+                    b.HasIndex("FileArtifactId");
+
                     b.HasIndex("ExamId", "Number")
                         .IsUnique();
 
                     b.ToTable("Questions");
+                });
+
+            modelBuilder.Entity("EconGrader.Domain.Entities.QuestionAnswerKey", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ArtifactId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("QuestionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ArtifactId");
+
+                    b.HasIndex("QuestionId", "SortOrder");
+
+                    b.ToTable("QuestionAnswerKeys");
+                });
+
+            modelBuilder.Entity("EconGrader.Domain.Entities.QuestionAsset", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ArtifactId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("QuestionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ArtifactId");
+
+                    b.HasIndex("QuestionId", "SortOrder");
+
+                    b.ToTable("QuestionAssets");
                 });
 
             modelBuilder.Entity("EconGrader.Domain.Entities.Rubric", b =>
@@ -486,6 +970,11 @@ namespace EconGrader.Web.Migrations
 
             modelBuilder.Entity("EconGrader.Domain.Entities.Answer", b =>
                 {
+                    b.HasOne("EconGrader.Domain.Entities.Artifact", "OriginalArtifact")
+                        .WithMany()
+                        .HasForeignKey("OriginalArtifactId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("EconGrader.Domain.Entities.Question", "Question")
                         .WithMany("Answers")
                         .HasForeignKey("QuestionId")
@@ -498,9 +987,40 @@ namespace EconGrader.Web.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.Navigation("OriginalArtifact");
+
                     b.Navigation("Question");
 
                     b.Navigation("Student");
+                });
+
+            modelBuilder.Entity("EconGrader.Domain.Entities.AnswerPage", b =>
+                {
+                    b.HasOne("EconGrader.Domain.Entities.Answer", "Answer")
+                        .WithMany()
+                        .HasForeignKey("AnswerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("EconGrader.Domain.Entities.Artifact", "Artifact")
+                        .WithMany()
+                        .HasForeignKey("ArtifactId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Answer");
+
+                    b.Navigation("Artifact");
+                });
+
+            modelBuilder.Entity("EconGrader.Domain.Entities.Artifact", b =>
+                {
+                    b.HasOne("EconGrader.Domain.Entities.Artifact", "Parent")
+                        .WithMany()
+                        .HasForeignKey("ParentArtifactId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Parent");
                 });
 
             modelBuilder.Entity("EconGrader.Domain.Entities.AuditLog", b =>
@@ -512,6 +1032,61 @@ namespace EconGrader.Web.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("EconGrader.Domain.Entities.BulkAnswerBatch", b =>
+                {
+                    b.HasOne("EconGrader.Domain.Entities.Question", "Question")
+                        .WithMany()
+                        .HasForeignKey("QuestionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("EconGrader.Domain.Entities.Artifact", "SourceArtifact")
+                        .WithMany()
+                        .HasForeignKey("SourceArtifactId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Question");
+
+                    b.Navigation("SourceArtifact");
+                });
+
+            modelBuilder.Entity("EconGrader.Domain.Entities.BulkPageMapping", b =>
+                {
+                    b.HasOne("EconGrader.Domain.Entities.BulkAnswerBatch", "Batch")
+                        .WithMany()
+                        .HasForeignKey("BatchId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("EconGrader.Domain.Entities.Student", "MatchedStudent")
+                        .WithMany()
+                        .HasForeignKey("MatchedStudentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("EconGrader.Domain.Entities.Artifact", "PageArtifact")
+                        .WithMany()
+                        .HasForeignKey("PageArtifactId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Batch");
+
+                    b.Navigation("MatchedStudent");
+
+                    b.Navigation("PageArtifact");
+                });
+
+            modelBuilder.Entity("EconGrader.Domain.Entities.EvalRun", b =>
+                {
+                    b.HasOne("EconGrader.Domain.Entities.Question", "Question")
+                        .WithMany()
+                        .HasForeignKey("QuestionId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Question");
+                });
+
             modelBuilder.Entity("EconGrader.Domain.Entities.Exam", b =>
                 {
                     b.HasOne("EconGrader.Domain.Entities.User", "CreatedBy")
@@ -520,7 +1095,14 @@ namespace EconGrader.Web.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("EconGrader.Domain.Entities.Artifact", "RubricFileArtifact")
+                        .WithMany()
+                        .HasForeignKey("RubricFileArtifactId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("CreatedBy");
+
+                    b.Navigation("RubricFileArtifact");
                 });
 
             modelBuilder.Entity("EconGrader.Domain.Entities.ExamCorrector", b =>
@@ -540,6 +1122,16 @@ namespace EconGrader.Web.Migrations
                     b.Navigation("Corrector");
 
                     b.Navigation("Exam");
+                });
+
+            modelBuilder.Entity("EconGrader.Domain.Entities.GradingJob", b =>
+                {
+                    b.HasOne("EconGrader.Domain.Entities.GradingRun", "GradingRun")
+                        .WithMany()
+                        .HasForeignKey("GradingRunId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("GradingRun");
                 });
 
             modelBuilder.Entity("EconGrader.Domain.Entities.GradingRun", b =>
@@ -569,15 +1161,78 @@ namespace EconGrader.Web.Migrations
                     b.Navigation("Student");
                 });
 
+            modelBuilder.Entity("EconGrader.Domain.Entities.IngestJob", b =>
+                {
+                    b.HasOne("EconGrader.Domain.Entities.Artifact", "OriginalArtifact")
+                        .WithMany()
+                        .HasForeignKey("OriginalArtifactId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("OriginalArtifact");
+                });
+
             modelBuilder.Entity("EconGrader.Domain.Entities.Question", b =>
                 {
+                    b.HasOne("EconGrader.Domain.Entities.Artifact", "AnswerKeyArtifact")
+                        .WithMany()
+                        .HasForeignKey("AnswerKeyArtifactId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("EconGrader.Domain.Entities.Exam", "Exam")
                         .WithMany("Questions")
                         .HasForeignKey("ExamId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("EconGrader.Domain.Entities.Artifact", "FileArtifact")
+                        .WithMany()
+                        .HasForeignKey("FileArtifactId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("AnswerKeyArtifact");
+
                     b.Navigation("Exam");
+
+                    b.Navigation("FileArtifact");
+                });
+
+            modelBuilder.Entity("EconGrader.Domain.Entities.QuestionAnswerKey", b =>
+                {
+                    b.HasOne("EconGrader.Domain.Entities.Artifact", "Artifact")
+                        .WithMany()
+                        .HasForeignKey("ArtifactId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("EconGrader.Domain.Entities.Question", "Question")
+                        .WithMany("AnswerKeys")
+                        .HasForeignKey("QuestionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Artifact");
+
+                    b.Navigation("Question");
+                });
+
+            modelBuilder.Entity("EconGrader.Domain.Entities.QuestionAsset", b =>
+                {
+                    b.HasOne("EconGrader.Domain.Entities.Artifact", "Artifact")
+                        .WithMany()
+                        .HasForeignKey("ArtifactId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("EconGrader.Domain.Entities.Question", "Question")
+                        .WithMany("Assets")
+                        .HasForeignKey("QuestionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Artifact");
+
+                    b.Navigation("Question");
                 });
 
             modelBuilder.Entity("EconGrader.Domain.Entities.Rubric", b =>
@@ -648,7 +1303,11 @@ namespace EconGrader.Web.Migrations
 
             modelBuilder.Entity("EconGrader.Domain.Entities.Question", b =>
                 {
+                    b.Navigation("AnswerKeys");
+
                     b.Navigation("Answers");
+
+                    b.Navigation("Assets");
 
                     b.Navigation("GradingRuns");
 

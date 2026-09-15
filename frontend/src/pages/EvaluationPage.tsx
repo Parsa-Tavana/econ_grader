@@ -1,6 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { FlaskConical } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -17,11 +18,14 @@ import {
 } from "recharts";
 import { listExams } from "../api/exams";
 import { listQuestionsByExam } from "../api/questions";
-import { evaluateExam, evaluateQuestion } from "../api/evaluation";
+import { evaluateExam, evaluateQuestion, goldenSetHistory, runGoldenSet } from "../api/evaluation";
 import {
   PageHeader,
   Card,
   CardHeader,
+  Badge,
+  Button,
+  Input,
   Select,
   Field,
   LoadingBlock,
@@ -30,14 +34,19 @@ import {
   friendlyError,
 } from "../components/ui";
 import { Stat } from "../components/common";
-import { formatNumber, formatScore, toFaDigits } from "../utils/format";
+import { formatDateTime, formatNumber, formatScore, toFaDigits } from "../utils/format";
 import { currentLang } from "../hooks/useLang";
+import { apiErrorMessage } from "../api/client";
+import { getAuthUser } from "../api/auth";
+import { hasRole } from "../utils/roles";
+import type { GoldenSetHistoryRow, GoldenSetResultDto } from "../types/models";
 
 const GREEN = "#10b981";
 
 export default function EvaluationPage() {
   const { t } = useTranslation();
   const lang = currentLang();
+  const isTeacher = hasRole(getAuthUser(), "Teacher");
 
   const examsQ = useQuery({ queryKey: ["exams"], queryFn: listExams });
   const [examId, setExamId] = useState("");
@@ -140,9 +149,196 @@ export default function EvaluationPage() {
             {toFaDigits(`n = ${ev.count}`)} · QWK:{" "}
             {ev.quadraticWeightedKappa != null ? formatNumber(ev.quadraticWeightedKappa, lang) : "—"}
           </p>
+
+          {/* M4 golden-set harness — question scope only (baseline is per-question) */}
+          {isTeacher && effectiveQuestionId ? (
+            <GoldenSetPanel questionId={effectiveQuestionId} t={t} lang={lang} />
+          ) : null}
         </>
       )}
     </>
+  );
+}
+
+type GoldenSetHistoryEntry = GoldenSetHistoryRow;
+
+function GoldenSetPanel({
+  questionId,
+  t,
+  lang,
+}: {
+  questionId: string;
+  t: (k: string) => string;
+  lang: "fa" | "en";
+}) {
+  const qc = useQueryClient();
+
+  // Harness controls (defaults mirror the API: temp 0, prompt "default", 10 answers)
+  const [temperature, setTemperature] = useState(0);
+  const [maxAnswers, setMaxAnswers] = useState(10);
+  const [note, setNote] = useState("");
+
+  const runMut = useMutation({
+    mutationFn: () =>
+      runGoldenSet({
+        questionId,
+        temperature,
+        maxAnswers,
+        note: note.trim() || undefined,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["golden-set-history", questionId] });
+    },
+  });
+
+  const historyQ = useQuery({
+    queryKey: ["golden-set-history", questionId],
+    queryFn: () => goldenSetHistory(questionId),
+    retry: false,
+  });
+
+  const result = runMut.data as GoldenSetResultDto | undefined;
+  const rows: GoldenSetHistoryEntry[] = historyQ.data ?? [];
+
+  return (
+    <Card className="mt-5">
+      <CardHeader
+        title={t("evaluation.goldenSetTitle")}
+        subtitle={t("evaluation.goldenSetSubtitle")}
+        action={<FlaskConical size={16} className="text-primary-500" />}
+      />
+
+      {/* Controls */}
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Field label={t("gradingDialog.temperature")}>
+          <Input
+            type="number"
+            min={0}
+            max={2}
+            step={0.1}
+            value={temperature}
+            onChange={(e) => setTemperature(Number(e.target.value))}
+          />
+        </Field>
+        <Field label={t("evaluation.goldenSetMaxAnswers")} hint={t("evaluation.goldenSetMaxAnswersHint")}>
+          <Input
+            type="number"
+            min={3}
+            max={50}
+            value={maxAnswers}
+            onChange={(e) => setMaxAnswers(Math.min(50, Math.max(3, Number(e.target.value))))}
+          />
+        </Field>
+        <Field label={`${t("reviews.note")} (${t("common.optional")})`}>
+          <Input value={note} onChange={(e) => setNote(e.target.value)} maxLength={200} />
+        </Field>
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-3">
+        <p className="text-[11px] text-zinc-400">{t("evaluation.goldenSetHint")}</p>
+        <Button onClick={() => runMut.mutate()} loading={runMut.isPending}>
+          <FlaskConical size={15} /> {t("evaluation.goldenSetRun")}
+        </Button>
+      </div>
+
+      {/* Error / result banner */}
+      {runMut.isError ? (
+        <p className="mt-3 rounded-xl bg-red-50 p-3 text-xs text-red-700">
+          {friendlyError(apiErrorMessage(runMut.error), t)}
+        </p>
+      ) : null}
+      {result ? (
+        <div
+          className={`mt-3 rounded-xl p-3 text-sm ${
+            result.regressed
+              ? "bg-red-50 text-red-800"
+              : result.qwkDelta == null
+                ? "bg-amber-50 text-amber-800"
+                : "bg-emerald-50 text-emerald-800"
+          }`}
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone={result.regressed ? "red" : result.qwkDelta == null ? "amber" : "green"}>
+              {result.regressed
+                ? t("evaluation.goldenSetRegressed")
+                : result.qwkDelta == null
+                  ? t("evaluation.goldenSetInconclusive")
+                  : t("evaluation.goldenSetPass")}
+            </Badge>
+            <span className="ltr-token tabular-nums">
+              QWK{" "}
+              {result.baselineQwk != null ? formatNumber(result.baselineQwk, lang) : "—"} →{" "}
+              {result.candidateQwk != null ? formatNumber(result.candidateQwk, lang) : "—"} (Δ{" "}
+              {result.qwkDelta != null ? formatNumber(result.qwkDelta, lang) : "—"})
+            </span>
+            <span className="ltr-token tabular-nums">
+              MAE {result.baselineMae != null ? formatScore(result.baselineMae, lang) : "—"} →{" "}
+              {result.candidateMae != null ? formatScore(result.candidateMae, lang) : "—"}
+            </span>
+            <span className="ltr-token tabular-nums">
+              {t("evaluation.nPairs")} {result.baselineCount}/{result.candidateCount}
+            </span>
+          </div>
+          <p className="mt-2 text-xs ltr-token">{result.verdict}</p>
+        </div>
+      ) : null}
+
+      {/* History */}
+      <div className="mt-5">
+        <p className="mb-2 text-xs font-medium text-zinc-500">{t("evaluation.goldenSetHistory")}</p>
+        {historyQ.isLoading ? (
+          <LoadingBlock />
+        ) : historyQ.isError ? (
+          <p className="text-xs text-zinc-400">{friendlyError(apiErrorMessage(historyQ.error), t)}</p>
+        ) : !rows.length ? (
+          <p className="py-3 text-center text-xs text-zinc-400">{t("evaluation.goldenSetNoHistory")}</p>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-zinc-200">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-zinc-50 text-zinc-500">
+                  <th className="px-3 py-2 text-start font-medium">{t("evaluation.goldenSetWhen")}</th>
+                  <th className="px-3 py-2 text-end font-medium">QWK</th>
+                  <th className="px-3 py-2 text-end font-medium">ΔQWK</th>
+                  <th className="px-3 py-2 text-end font-medium">{t("evaluation.mae")}</th>
+                  <th className="px-3 py-2 text-end font-medium">{t("evaluation.exactMatch")}</th>
+                  <th className="px-3 py-2 text-end font-medium">{t("evaluation.nPairs")}</th>
+                  <th className="px-3 py-2 text-end font-medium">{t("evaluation.goldenSetVerdict")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id} className="border-t border-zinc-100">
+                    <td className="px-3 py-2 text-zinc-500">{formatDateTime(r.createdAt, lang)}</td>
+                    <td className="px-3 py-2 text-end tabular-nums ltr-token">
+                      {r.candidateQwk != null ? formatNumber(r.candidateQwk, lang) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-end tabular-nums ltr-token">
+                      {r.qwkDelta != null ? formatNumber(r.qwkDelta, lang) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-end tabular-nums">
+                      {r.candidateMae != null ? formatScore(r.candidateMae, lang) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-end tabular-nums ltr-token">
+                      {r.candidateExactAgreementPct != null
+                        ? `${formatNumber(r.candidateExactAgreementPct, lang)}٪`
+                        : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-end tabular-nums">
+                      {formatNumber(r.candidateCount, lang)}
+                    </td>
+                    <td className="px-3 py-2 text-end">
+                      <Badge tone={r.regressed ? "red" : "green"}>
+                        {r.regressed ? t("evaluation.goldenSetRegressed") : t("evaluation.goldenSetPass")}
+                      </Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 

@@ -24,6 +24,30 @@ public interface IGradingClient
         CancellationToken cancellationToken = default
     );
 
+    /// <summary>
+    /// Render/normalize ONE uploaded document at ingest time (M1 pipeline):
+    /// returns per-page, per-format content hashes + payloads. The caller
+    /// stores pages under content-addressed keys and registers artifacts.
+    /// </summary>
+    Task<IngestServiceResponse> IngestAsync(
+        string absoluteFilePath,
+        IReadOnlyList<string>? formats = null,
+        int? maxPages = null,
+        int? pageOffset = null,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>
+    /// M6 bulk split: OCR the header band of already-rendered page images.
+    /// Pure tesseract OCR — no AI tokens. Returns per-page normalized student
+    /// ids + confidences; grouping stays on the .NET side.
+    /// </summary>
+    Task<SplitHeaderResponse> SplitHeaderAsync(
+        IReadOnlyList<string> absolutePagePaths,
+        decimal? headerBandPct = null,
+        CancellationToken cancellationToken = default
+    );
+
     Task<TEvaluationResult?> EvaluateAsync(
         IEnumerable<(decimal TeacherScore, decimal AiScore)> runs,
         CancellationToken cancellationToken = default

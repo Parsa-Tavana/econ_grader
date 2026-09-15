@@ -23,6 +23,10 @@ public class GradingRun
     public string? ValidationErrorsJson { get; set; }
     public string? CriteriaScoresJson { get; set; } // per-criterion scores
     public string? Reasoning { get; set; }
+    /// <summary>Full lineage (M1/M4): the artifacts this run consumed —
+    /// [{kind, role, sha256, page?}] for answer/question/پاسخنامه pages.
+    /// A run with a پاسخنامه provably consumed it via role=model_answer.</summary>
+    public string? InputArtifactsJson { get; set; }
     
     public long LatencyMs { get; set; }
     public int InputTokens { get; set; }

@@ -78,11 +78,22 @@ services:
       # the JSON never starts and the run fails with raw_len=0 (observed live).
       # 8192 covers reasoning + full grading JSON for multi-page PDF answers.
       - DEFAULT_MAX_TOKENS=8192
+      # M5: gateway-side JSON mode (response_format json_object) — cuts parse
+      # failures. Set RESPONSE_FORMAT_JSON_OBJECT=0 only if a gateway rejects
+      # the parameter outright (then the hardened parser handles it alone).
+      - RESPONSE_FORMAT_JSON_OBJECT=${RESPONSE_FORMAT_JSON_OBJECT:-1}
       # Exam-rubric extraction (POST /extract): the whole grading key comes
       # back as ONE JSON document, so it needs a much larger output budget
       # than a single grading run.
       - EXTRACTION_MAX_TOKENS=16384
       - EXTRACT_MAX_PAGES=20
+      # Ingest (POST /ingest): JPEG quality for the jpeg150 render format and
+      # per-document page cap (matches Ingest:MaxPages on the API side).
+      - INGEST_JPEG_QUALITY=85
+      - INGEST_MAX_PAGES=20
+      # M6 bulk split (POST /split-header): header-band geometry. The API side
+      # passes Split:HeaderBandPct per request; this env is the fallback default.
+      - SPLIT_HEADER_BAND_PCT=${SPLIT_HEADER_BAND_PCT:-12}
       # MUST match FileStorage__RootPath of the api service below:
       # the API sends absolute image paths to Python, so both containers
       # need the identical shared volume mounted at the same path.
@@ -133,6 +144,14 @@ services:
       - Jwt__SigningKey=${JWT_SIGNING_KEY}
       - Jwt__BootstrapAdminKey=${JWT_BOOTSTRAP_ADMIN_KEY}
       - Serilog__MinimumLevel__Default=Information
+      # Grading queue (M2): api serves HTTP; Grading:Mode=queue flips
+      # POST /grading/run to 202-enqueue (default sync until M3 UI ships).
+      - AppRole=api
+      - Grading__Mode=${GRADING_MODE:-sync}
+      - Grading__MaxInFlight=${GRADING_MAX_IN_FLIGHT:-4}
+      - Grading__LeaseSeconds=${GRADING_LEASE_SECONDS:-600}
+      # M5: optional per-ensemble-slot temperature step (default 0 = slots identical).
+      - Grading__EnsembleStagger=${GRADING_ENSEMBLE_STAGGER:-0}
     volumes:
       # Same volume & path as the grading service (see comment above).
       - app_storage:/srv/storage
@@ -141,6 +160,55 @@ services:
       # Loopback-only: local Vite dev proxy (:5173 → localhost:8080) and
       # curl checks still work; other machines cannot reach the API directly.
       - "127.0.0.1:8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      grading:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Grading queue worker (M2): same image as api, AppRole=worker runs the
+  # lease loop instead of Kestrel. GLOBAL in-flight cap (Grading:MaxInFlight,
+  # default 4) lives inside the claim query — `--scale worker=N` adds
+  # failover/throughput headroom but NEVER multiplies gateway concurrency.
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: econgrader-worker
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - TZ=Asia/Tehran
+      - ConnectionStrings__DefaultConnection=Server=db,1433;Database=EconGrader;User Id=econgrader_app;Password=$DB_APP_PASSWORD;TrustServerCertificate=True;Encrypt=False
+      - GradingService__BaseUrl=http://grading:5001
+      - GradingService__InternalKey=${GRADING_INTERNAL_KEY:-}
+      - FileStorage__RootPath=/srv/storage/images
+      - Jwt__SigningKey=${JWT_SIGNING_KEY}
+      - Jwt__BootstrapAdminKey=${JWT_BOOTSTRAP_ADMIN_KEY}
+      - Serilog__MinimumLevel__Default=Information
+      - AppRole=worker
+      - Grading__Mode=queue
+      - Grading__MaxInFlight=${GRADING_MAX_IN_FLIGHT:-4}
+      - Grading__LeaseSeconds=${GRADING_LEASE_SECONDS:-600}
+      # M5: must match the api service so sync and queue modes agree.
+      - Grading__EnsembleStagger=${GRADING_ENSEMBLE_STAGGER:-0}
+      - Ingest__PageFormat=${INGEST_PAGE_FORMAT:-png200}
+      - Ingest__MaxPages=${INGEST_MAX_PAGES_DOTNET:-20}
+      # M6 bulk split: OCR-only answer-sheet splitting jobs (no AI tokens).
+      # HeaderBandPct must match SPLIT_HEADER_BAND_PCT on the grading service.
+      - Split__HeaderBandPct=${SPLIT_HEADER_BAND_PCT:-12}
+      - Split__OcrConfidenceThreshold=${SPLIT_OCR_CONFIDENCE_THRESHOLD:-0.8}
+      - Split__MaxPages=${SPLIT_MAX_PAGES:-400}
+      - Split__IngestWindowSize=${SPLIT_INGEST_WINDOW_SIZE:-20}
+    volumes:
+      - app_storage:/srv/storage
     depends_on:
       db:
         condition: service_healthy

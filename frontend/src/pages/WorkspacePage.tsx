@@ -7,10 +7,12 @@ import {
   Bot,
   Check,
   FileText,
+  Landmark,
   Layers,
   Pencil,
   Play,
   Plus,
+  ScrollText,
   ShieldCheck,
   Trash2,
 } from "lucide-react";
@@ -30,8 +32,8 @@ import {
   overrideRun,
 } from "../api/grading";
 import type { TeacherReviewDto } from "../types/models";
-import type { GradingRun } from "../types/models";
-import { parseCriteriaScores } from "../types/models";
+import type { GradingRun, LineageEntry } from "../types/models";
+import { parseCriteriaScores, parseLineage } from "../types/models";
 import {
   PageHeader,
   Card,
@@ -48,7 +50,7 @@ import {
 } from "../components/ui";
 import { AnswerStatusBadge } from "../components/common";
 import { AuthFileView } from "../components/AuthFileView";
-import { formatCost, formatLatency, formatNumber, formatScore, formatDateTime, timeAgo } from "../utils/format";
+import { formatCost, formatLatency, formatNumber, formatScore, formatDateTime, timeAgo, toFaDigits } from "../utils/format";
 import { currentLang } from "../hooks/useLang";
 import { useToast } from "../hooks/useToast";
 import { getAuthUser } from "../api/auth";
@@ -832,6 +834,7 @@ function RunRow({
       <span className="text-zinc-400" title={formatDateTime(run.createdAt, lang)}>
         {timeAgo(run.createdAt, lang)}
       </span>
+      <LineageChip run={run} />
       <span className="flex-1" />
       {run.teacherScoreSnapshot != null ? (
         <Badge tone="blue">
@@ -844,5 +847,81 @@ function RunRow({
         </span>
       ) : null}
     </button>
+  );
+}
+
+/** M4 lineage chip: what this run was graded against. Collapses the parsed
+ * lineage to a compact "pages p2–p3" per role; tooltip carries the sha256s. */
+function LineageChip({ run }: { run: GradingRun }) {
+  const { t } = useTranslation();
+  const lang = currentLang();
+  const lineage = parseLineage(run.inputArtifactsJson);
+  if (!lineage.length) return null;
+
+  const ROLES: Record<
+    LineageEntry["role"],
+    { labelKey: string; tone: "blue" | "violet" | "amber"; Icon: typeof FileText }
+  > = {
+    answer: { labelKey: "lineage.answerPages", tone: "blue", Icon: FileText },
+    question: { labelKey: "lineage.questionPages", tone: "violet", Icon: Layers },
+    model_answer: { labelKey: "lineage.modelAnswerPages", tone: "amber", Icon: ScrollText },
+  };
+  const legacyKey: Record<LineageEntry["role"], string> = {
+    answer: "lineage.answerFile",
+    question: "lineage.questionFile",
+    model_answer: "lineage.modelAnswerFile",
+  };
+
+  const groups = (["answer", "question", "model_answer"] as const)
+    .map((role) => ({ role, entries: lineage.filter((e) => e.role === role) }))
+    .filter((g) => g.entries.length > 0)
+    .map((g) => {
+      const pages = g.entries
+        .map((e) => e.page)
+        .filter((p): p is number => p != null)
+        .sort((a, b) => a - b);
+      if (!pages.length) {
+        // legacy whole-file fallback
+        return {
+          role: g.role,
+          label: t(legacyKey[g.role]),
+          detail: (g.entries[0].storage_key ?? "").split("/").pop() ?? "",
+        };
+      }
+      const range =
+        pages.length === 1
+          ? `p${pages[0]}`
+          : pages[pages.length - 1] - pages[0] === pages.length - 1
+            ? `p${pages[0]}–p${pages[pages.length - 1]}`
+            : pages.map((p) => `p${p}`).join(", ");
+      return {
+        role: g.role,
+        label: toFaDigits(t(ROLES[g.role].labelKey, { pages: range })),
+        detail: g.entries.map((e) => (e.sha256 ?? "").slice(0, 12)).filter(Boolean).join(" "),
+      };
+    });
+  if (!groups.length) return null;
+
+  return (
+    <span className="flex flex-wrap items-center gap-1">
+      {groups.map((g) => {
+        const meta = ROLES[g.role];
+        return (
+          <span
+            key={g.role}
+            title={g.detail ? `${g.label} — ${g.detail}` : g.label}
+            className={clsx(
+              "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap",
+              meta.tone === "blue" && "border-blue-200 bg-blue-50 text-blue-700",
+              meta.tone === "violet" && "border-violet-200 bg-violet-50 text-violet-700",
+              meta.tone === "amber" && "border-amber-200 bg-amber-50 text-amber-700"
+            )}
+          >
+            <meta.Icon size={11} />
+            {g.label}
+          </span>
+        );
+      })}
+    </span>
   );
 }

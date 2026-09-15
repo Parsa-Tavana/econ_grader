@@ -10,6 +10,13 @@ chunked body, while vision grading legitimately takes minutes before the
 FIRST token. Streaming keeps bytes flowing and defeats the idle timeout.
 Set the env var GLM_STREAMING=0 (or GPT_STREAMING=0) to fall back to
 non-streaming for a provider that mishandles SSE.
+
+M5 payload hygiene:
+- `response_format: {"type": "json_object"}` on every call (config toggle
+  RESPONSE_FORMAT_JSON_OBJECT) — gateway-side JSON mode cuts parse failures;
+  the hardened parser stays as the fallback.
+- Message ordering is prefix-stable: system → question text + rubric →
+  question paper pages → student material last.
 """
 from __future__ import annotations
 
@@ -177,6 +184,12 @@ class OpenAICompatibleGrader(IVisionGrader):
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        # M5: JSON mode at the gateway — the model is constrained to emit a
+        # single JSON object, cutting parse failures (and thus full-payload
+        # retries). The hardened parser below stays as the fallback for
+        # gateways that ignore the parameter.
+        if settings.RESPONSE_FORMAT_JSON_OBJECT:
+            payload["response_format"] = {"type": "json_object"}
         headers = {
             "Authorization": f"{self._auth_scheme} {self._api_key}",
             "Content-Type": "application/json",
@@ -222,12 +235,12 @@ class OpenAICompatibleGrader(IVisionGrader):
         prompt_text = load_prompt(prompt_version)
 
         content: list[dict[str, Any]] = []
-        # Order matters: question paper → student answer → prompt.
-        # Each image group gets an explicit TEXT label. Without one the model
-        # receives an anonymous stack of pages and can attribute printed
-        # question-paper figures (graphs, tables) to the student's own work
-        # (observed live: a model "saw a diagram in the student answer" that
-        # was actually printed on the question paper).
+        # M5 message ordering (prefix-stable for future cache providers):
+        # system → question text + rubric → question paper pages → student
+        # material LAST. Pages still get explicit TEXT labels — without one
+        # the model receives an anonymous stack of pages and can attribute
+        # printed question-paper figures (graphs, tables) to the student's
+        # own work (observed live).
         def _img(data: bytes, media_type: str) -> dict[str, Any]:
             return {"type": "image_url", "image_url": {
                 "url": f"data:{media_type};base64,{base64.b64encode(data).decode()}"
@@ -236,11 +249,20 @@ class OpenAICompatibleGrader(IVisionGrader):
         def _txt(value: str) -> dict[str, Any]:
             return {"type": "text", "text": value}
 
+        # 1) Question statement + rubric — text first, before any image.
+        content.append({"type": "text", "text": prompt_text.format(
+            question_text=question_text,
+            rubric_json=json.dumps(rubric, indent=2),
+            max_score=max_score,
+        )})
+        # 2) Question paper (the printed exam sheet — NOT the student's work).
         if question_images:
             content.append(_txt(
                 "IMAGES OF THE QUESTION PAPER (the printed exam sheet — NOT the student's work):"
             ))
             content.extend(_img(d, mt) for d, mt in question_images)
+        # 3) Student's handwritten answer — LAST so it sits nearest to the
+        # generation point.
         if answer_images:
             content.append(_txt(
                 "IMAGES OF THE STUDENT'S HANDWRITTEN ANSWER — grade ONLY what the student "
@@ -254,11 +276,6 @@ class OpenAICompatibleGrader(IVisionGrader):
         if extra_text.strip():
             # Extracted text from the student's typed answer documents
             content.append(_txt(f"Student typed answer documents:\n{extra_text.strip()}"))
-        content.append({"type": "text", "text": prompt_text.format(
-            question_text=question_text,
-            rubric_json=json.dumps(rubric, indent=2),
-            max_score=max_score,
-        )})
 
         try:
             body = self._chat(

@@ -16,16 +16,40 @@ _FALLBACK = {
     "default": {"input_per_million": 0.0, "output_per_million": 0.0, "image_per_million": 0.0},
 }
 
+# M5 payload hygiene: pricing.json is read from disk on EVERY /grade and
+# /extract call today. Cache it in-process, keyed by (path, mtime) so an edit
+# to pricing.json is picked up on the next call without a restart (cheap
+# file-watch semantics — no watcher thread needed).
 
-def _load_pricing(path: str | None = None) -> dict:
-    for p in (path, "pricing.json", "app/pricing.json", "../pricing.json"):
-        if p and Path(p).exists():
+
+def _load_pricing_cached(path: str | None) -> dict:
+    candidates: list[str] = [path] if path else ["pricing.json", "app/pricing.json", "../pricing.json"]
+    for p in candidates:
+        f = Path(p) if p else None
+        if f and f.exists():
             try:
-                return json.loads(Path(p).read_text(encoding="utf-8"))
+                mtime = f.stat().st_mtime
+            except OSError:
+                continue
+            cached = _PRICING_CACHE.get(p)
+            if cached is not None and cached[0] == mtime:
+                return cached[1]
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
             except Exception:
                 logger.warning("Failed to load pricing file %s", p)
+                continue
+            _PRICING_CACHE[p] = (mtime, data)
+            return data
     logger.info("Using fallback cost pricing (pricing.json not found)")
     return _FALLBACK
+
+
+_PRICING_CACHE: dict[str, tuple[float, dict]] = {}
+
+
+def _load_pricing(path: str | None = None) -> dict:
+    return _load_pricing_cached(path)
 
 
 def estimate_cost(
@@ -37,7 +61,7 @@ def estimate_cost(
     pricing_path: Optional[str] = None,
 ) -> float:
     """Cost in USD for one grading call."""
-    pricing = _load_pricing(pricing_path)
+    pricing = _load_pricing_cached(pricing_path)
     cfg = pricing.get(provider.lower(), pricing.get("default", _FALLBACK.get(provider.lower(), {})))
     
     ip = float(cfg.get("input_per_million", 0) or 0)
