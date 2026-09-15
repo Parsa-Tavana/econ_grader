@@ -854,7 +854,6 @@ function RunRow({
  * lineage to a compact "pages p2–p3" per role; tooltip carries the sha256s. */
 function LineageChip({ run }: { run: GradingRun }) {
   const { t } = useTranslation();
-  const lang = currentLang();
   const lineage = parseLineage(run.inputArtifactsJson);
   if (!lineage.length) return null;
 
