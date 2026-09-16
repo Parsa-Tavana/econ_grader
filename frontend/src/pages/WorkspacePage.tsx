@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import {
   Bot,
   Check,
+  Download,
   FileText,
   Layers,
   Pencil,
@@ -21,7 +22,7 @@ import {
   listAnswersByQuestion,
 } from "../api/answers";
 import { apiErrorMessage, fetchAuthenticatedFile } from "../api/client";
-import { getQuestion, getActiveRubric, createRubric } from "../api/questions";
+import { getQuestion, getActiveRubric, createRubric, questionFileUrl, answerKeyUrl } from "../api/questions";
 import type { RubricCriterionDto } from "../types/models";
 import {
   runGrading,
@@ -105,6 +106,8 @@ export default function WorkspacePage() {
   // grading controls
   const [temperature, setTemperature] = useState(0);
   const [runCount, setRunCount] = useState(1);
+  const [documentSelection, setDocumentSelection] = useState({ answerId, role: "student" });
+  const [downloading, setDownloading] = useState(false);
 
   // Run-history selection: when null the workspace shows the LATEST valid run;
   // clicking a run in "تاریخچه اجراها" pins that specific run instead.
@@ -240,6 +243,34 @@ export default function WorkspacePage() {
   const answer = answerQ.data!;
   const question = questionQ.data;
   const criteriaScores = activeRun ? parseCriteriaScores(activeRun.criteriaScoresJson) : [];
+  const documents = [
+    { role: "student", label: t("viewer.studentAnswer"), path: `/answers/${answer.id}/image`, fileName: answer.fileName, contentType: answer.contentType, available: true },
+    { role: "teacher", label: t("viewer.teacherAnswer"), path: answerKeyUrl(answer.questionId), fileName: question?.answerKeyFileName, contentType: question?.answerKeyContentType, available: !!question?.answerKeyFileName },
+    { role: "question", label: t("viewer.questionFile"), path: questionFileUrl(answer.questionId), fileName: question?.fileName, contentType: question?.contentType, available: !!question?.fileName },
+  ];
+  const selectedRole = documentSelection.answerId === answerId ? documentSelection.role : "student";
+  const selectedDocument = documents.find((item) => item.role === selectedRole)!;
+  const documentType = (selectedDocument.contentType ?? "").split(";")[0].toLowerCase();
+  const isPdf = documentType === "application/pdf" || (!documentType && /\.pdf$/i.test(selectedDocument.fileName ?? ""));
+  const isImage = documentType.startsWith("image/") || (!documentType && /\.(png|jpe?g|gif|webp|bmp)$/i.test(selectedDocument.fileName ?? ""));
+
+  async function downloadDocument() {
+    setDownloading(true);
+    try {
+      const file = await fetchAuthenticatedFile(selectedDocument.path, selectedDocument.fileName ?? selectedDocument.role);
+      const link = document.createElement("a");
+      link.href = file.url;
+      link.download = file.fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(file.url), 10_000);
+    } catch (e) {
+      toast.error(friendlyError(apiErrorMessage(e), t));
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   const rubricSum = (rubricRows ?? []).reduce(
     (s, c) => s + (Number(c.maxScore) || 0),
@@ -260,61 +291,92 @@ export default function WorkspacePage() {
         }
       />
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        {/* ── Answer image pane ── */}
-        <Card className="p-3">
-          <div className="mb-2 flex items-center justify-between px-1">
-            <h3 className="text-sm font-semibold text-zinc-900">{t("viewer.answerScan")}</h3>
+      <div className="grid items-start gap-4 xl:grid-cols-2">
+        <Card className="min-w-0 p-3 xl:sticky xl:top-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
+            <h3 className="text-sm font-semibold text-zinc-900">{t("viewer.documents")}</h3>
             {question ? (
               <Badge tone="zinc">
                 {t("questions.maxScore")}: {formatScore(question.maxScore, lang)}
               </Badge>
             ) : null}
           </div>
-          <div className="overflow-hidden rounded-xl bg-zinc-100">
-            {answer.contentType ===
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ? (
-              <div className="flex h-40 flex-col items-center justify-center gap-2 text-sm text-zinc-500">
-                <FileText size={22} className="text-red-400" />
-                <span>{answer.fileName ?? t("viewer.answerScan")}</span>
-                {/* Authenticated download — a bare <a href> cannot attach the JWT and gets 401. */}
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={async () => {
-                    try {
-                      const file = await fetchAuthenticatedFile(
-                        `/answers/${answer.id}/image`,
-                        answer.fileName ?? "answer"
-                      );
-                      const a = document.createElement("a");
-                      a.href = file.url;
-                      a.download = file.fileName;
-                      document.body.appendChild(a);
-                      a.click();
-                      a.remove();
-                      setTimeout(() => URL.revokeObjectURL(file.url), 10_000);
-                    } catch (e) {
-                      toast.error(friendlyError(apiErrorMessage(e), t));
-                    }
-                  }}
-                >
-                  {t("common.download")}
-                </Button>
-              </div>
-            ) : (
-              /* Authenticated blob fetch — bare img/iframe URLs get 401 (no JWT header). */
+
+          {/* Segmented control — one tab per document. Tabs whose file was
+              never uploaded stay visible but disabled, so the user can see
+              what exists without being able to break the viewer. */}
+          <div
+            role="tablist"
+            aria-label={t("viewer.documents")}
+            className="mb-3 flex gap-1 rounded-xl bg-zinc-100 p-1"
+          >
+            {documents.map((doc) => (
+              <button
+                key={doc.role}
+                role="tab"
+                type="button"
+                aria-selected={selectedRole === doc.role}
+                disabled={!doc.available}
+                title={doc.available ? doc.fileName ?? doc.label : t("viewer.notUploaded")}
+                onClick={() => setDocumentSelection({ answerId, role: doc.role })}
+                className={clsx(
+                  "flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors",
+                  selectedRole === doc.role
+                    ? "bg-white text-zinc-900 shadow-sm"
+                    : "text-zinc-500 hover:text-zinc-700",
+                  !doc.available && "cursor-not-allowed text-zinc-300 hover:text-zinc-300"
+                )}
+              >
+                {doc.role === "student" ? (
+                  <FileText size={13} />
+                ) : doc.role === "teacher" ? (
+                  <ScrollText size={13} />
+                ) : (
+                  <Layers size={13} />
+                )}
+                <span className="truncate">{doc.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Fixed-height viewport: switching documents never reflows the page. */}
+          <div className="h-[560px] overflow-auto rounded-xl bg-zinc-100">
+            {isPdf || isImage ? (
               <AuthFileView
-                path={`/answers/${answer.id}/image`}
-                contentType={answer.contentType ?? null}
-                alt={`${t("viewer.answerScan")} — ${answer.studentExternalId}`}
+                path={selectedDocument.path}
+                contentType={selectedDocument.contentType ?? null}
+                alt={`${selectedDocument.label} — ${answer.studentExternalId}`}
                 className={
-                  answer.contentType === "application/pdf"
+                  isPdf
                     ? "h-[560px] w-full"
-                    : "max-h-[560px] w-full object-contain"
+                    : "min-h-full w-full object-contain"
                 }
               />
+            ) : (
+              /* Non-previewable (e.g. .docx) — authenticated download instead. */
+              <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-zinc-500">
+                <FileText size={22} className="text-zinc-400" />
+                <span>{selectedDocument.fileName ?? selectedDocument.label}</span>
+                <Button size="sm" variant="secondary" onClick={downloadDocument} loading={downloading}>
+                  <Download size={14} /> {t("common.download")}
+                </Button>
+              </div>
             )}
+          </div>
+
+          {/* Quiet meta footer: which file, and a download for any type. */}
+          <div className="mt-2 flex items-center justify-between gap-2 px-1 text-xs text-zinc-400">
+            <span className="min-w-0 truncate" title={selectedDocument.fileName ?? undefined}>
+              {selectedDocument.fileName ?? selectedDocument.label}
+            </span>
+            <button
+              type="button"
+              onClick={downloadDocument}
+              disabled={downloading}
+              className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 font-medium text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-700"
+            >
+              <Download size={13} /> {t("common.download")}
+            </button>
           </div>
           {question ? (
             <details className="mt-3 rounded-xl border border-zinc-200 p-3 text-sm">

@@ -361,6 +361,11 @@ const fa = {
     hideRawResponse: "بستن پاسخ خام",
   },
   viewer: {
+    documents: "اسناد",
+    studentAnswer: "برگه دانشجو",
+    teacherAnswer: "پاسخنامه استاد",
+    questionFile: "سوال",
+    notUploaded: "فایل بارگذاری نشده است",
     answerScan: "تصویر برگه پاسخ",
     zoomIn: "بزرگ‌نمایی",
     zoomOut: "کوچک‌نمایی",
