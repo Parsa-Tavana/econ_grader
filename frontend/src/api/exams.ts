@@ -64,3 +64,8 @@ export async function applyExtraction(
   const { data } = await api.post<ApplyExtractionResult>(`/exams/${examId}/extraction/apply`, { questions });
   return data;
 }
+/** Flip the exam's پاسخنامه gate (M1 flag; M4 turns it on with golden-set evidence). */
+export async function setGroundTruthGrading(examId: string, enabled: boolean): Promise<ExamDto> {
+  const { data } = await api.put<ExamDto>(`/exams/${examId}/ground-truth-grading`, { enabled });
+  return data;
+}

@@ -23,6 +23,10 @@ public class Answer
     /// <summary>Relative storage key (e.g. answers/{questionId}/{studentId}/file.ext).
     /// Supports PNG/JPG/PDF/DOCX; legacy rows contain images only.</summary>
     public string ImageStorageKey { get; set; } = null!;
+    /// <summary>Original artifact registered for this upload (content-hash
+    /// addressable; null for legacy rows until the backfill runs).</summary>
+    public Guid? OriginalArtifactId { get; set; }
+    public Artifact? OriginalArtifact { get; set; }
     /// <summary>Original file name shown to the user.</summary>
     public string? FileName { get; set; }
     /// <summary>MIME type of the stored file (image/png, application/pdf, …).</summary>

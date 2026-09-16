@@ -72,5 +72,6 @@ public sealed class ExamService : IExamService
 
     private static ExamDto Map(Exam e) => new(
         e.Id, e.Name, e.ExamDate, e.Description, e.CreatedAt, e.CreatedBy?.DisplayName ?? "unknown",
-        RubricFileName: e.RubricFileName, RubricFileContentType: e.RubricFileContentType);
+        RubricFileName: e.RubricFileName, RubricFileContentType: e.RubricFileContentType,
+        GroundTruthGradingEnabled: e.GroundTruthGradingEnabled);
 }

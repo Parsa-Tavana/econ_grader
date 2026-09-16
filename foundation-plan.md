@@ -10,6 +10,7 @@
 |---|---|---|---|
 | Scale | **Medium: 500–5,000 answers/exam** | Current single-host Docker stack serves this fine | No Redis/RabbitMQ now; DB-backed queue. Scaling path documented if load grows. |
 | Answer upload model | **Keep: one file per question, per student** | Matches today's UI and data model; teachers grade question-by-question | Per-student whole-exam batch grading is **not** the core win here — it becomes an optional add-on. Main wins: render-once artifacts, queue parallelism, smaller images. |
+| Bulk answer upload | **Add: one merged PDF per question → auto-split by printed header ID** | Teachers scan all 300 sheets into one file; the app splits it — no 300 manual uploads. Header IDs are **printed/typed at a fixed position**, 1+ pages per student, unknown IDs go to a review step | Split accuracy depends on scan quality; a review UI with confidence badges covers the residual. Requires M1 (artifacts); split runs as a job (M2 infra). |
 | Provider | **Stay on GLM gateway (ArvanCloud, OpenAI-compatible)** | Working today, zero token cost | No prompt-caching / first-party API work in this plan. Abstraction already supports a second slot (GPT) if economics change. |
 | Scope | **Full foundation, phased (5 milestones)** | One rebuild instead of patching request-time conversion forever | More upfront work than quick wins; each milestone ships working software, so risk is staged. |
 
@@ -150,6 +151,33 @@ class GradingRun { ...existing...; string? InputArtifactsJson; }  // [{kind, sha
 - Ensemble prompt-variance option: optional slight temperature stagger across ensemble indices (default stays 0.0).
 - **Accept:** parse-failure retry rate drops (visible in Langfuse/logs); no behavior change when parser succeeds.
 
+### M6 — Bulk answer-sheet split (one merged PDF → per-student answers)
+*Depends on M1 (page artifacts) + M2 (job queue). The feature that removes 300 manual uploads.*
+
+**Flow:**
+1. **Upload:** `POST /answers/bulk-upload?questionId=…` (teacher) → one merged PDF (all students' sheets for ONE question, ≤ some page cap, e.g. 400) → blob by hash → ingest renders every page once → each page becomes its own artifact (page-level sha256, per §1.3).
+2. **Split job** (queue, like M2): for each page, crop the fixed **header band** (config `Split:HeaderBandPct`, default top ~12%) → **tesseract OCR** (adds to grading-service container; Persian + Latin digits, normalizes ۰۱۲… → 0123) → per-page `RawOcrId` + confidence. **No AI tokens by default** — OCR is CPU-local. Pages below confidence threshold get an optional AI-vision fallback call (small, only for the residual; same gateway, vision-capable).
+3. **Grouping:** consecutive pages with the same normalized ID → one per-student stack (page order preserved). Same ID reappearing non-consecutively → **flagged for review**, never auto-grouped. Blank/unreadable header pages → "unmatched" bucket.
+4. **Review UI (the safety core):** teacher sees the proposed split as a grid: page thumbnails + detected ID + confidence badge, grouped per student. Fix actions: reassign page(s), merge/split stacks, map unknown IDs to existing students, create new students, mark blank/skip. Unknown IDs never auto-create Student rows (decision locked). Worst-case failure — a page assigned to the wrong student — is exactly what this screen exists to catch; confidence badges + thumbnail + detected ID make it a fast scan, not a 300-page read.
+5. **Confirm → apply:** for each mapped student: create or **replace** the existing Answer row (identical semantics to today's single upload: one answer per (student, question), previous file deleted) → link page artifacts (per-student stack) → audit-logged with batch id. Grading then proceeds through the normal M2/M3 paths.
+
+**Schema:**
+```csharp
+class BulkAnswerBatch { Guid Id; Guid QuestionId; Guid SourceArtifactId;
+    string Status;   // splitting | ready_for_review | applied | failed
+    int TotalPages; Guid? CreatedByUserId; DateTime CreatedAt; }
+class BulkPageMapping { Guid Id; Guid BatchId; Guid PageArtifactId; int PageNumber;
+    string? RawOcrId; decimal OcrConfidence; Guid? MatchedStudentId;
+    string ReviewStatus;  // auto | needs_review | unmatched | confirmed | skipped
+    int SortInStack; }    // page order within the student's stack
+// unique (BatchId, PageNumber); idempotent re-run: same source hash → existing batch, no re-OCR
+```
+
+**Config:** `Split:HeaderBandPct` (default 12), `Split:OcrConfidenceThreshold` (default 0.8), `Split:MaxPages` (default 400), `Split:VisionFallbackEnabled` (default true).
+
+- **Accept:** 300-page PDF → reviewed split in one screen; a teacher fixes ~5 low-confidence pages in <2 min; confirm produces 300 Answer rows (idempotent on re-confirm); re-uploading the same PDF reuses the batch without re-OCR; a page is never silently auto-assigned below the confidence threshold.
+- **Risks:** OCR misread assigns pages to the wrong student → mitigated by confidence gating + mandatory review step + audit trail (batch id on every created Answer); Persian digit normalization mistakes → unit-test the normalizer against real header samples (send one — see open question); scans with headers cropped/shifted → header-band padding config + vision fallback; duplicate ID = two students with the same ExternalId → impossible today (unique index) so OCR collision is caught at mapping time.
+
 ### Deliberately deferred
 Per-student whole-exam batch grading (upload model is per-question); Redis broker (DB queue is fine at this scale); S3/MinIO (local volume + hash layout ports trivially later); prompt caching (provider-dependent).
 
@@ -176,10 +204,12 @@ Backfill script (idempotent, run per milestone):
 | GLM gateway timeout variance under 4× concurrency | Medium | Bounded concurrency config; existing retry taxonomy (parse/timeout) carries over; worker marks job failed-with-errorKind for requeue |
 | DB queue contention at burst | Low at this scale | Rowversion/READPAST claim; defer broker until >~50k jobs/day |
 | Migration bugs on production files | Medium | Idempotent backfill + legacy-path fallback + per-milestone rollback |
+| Bulk split assigns a page to the WRONG student | Medium (consequence: severe) | Confidence gating below threshold never auto-assigns; mandatory review screen with thumbnails + detected ID; audit trail ties every created Answer to its batch; vision fallback for residual |
+| OCR misreads Persian/Latin digits in headers | Medium | Digit normalizer unit-tested on real samples; configurable confidence threshold; AI-vision fallback for residual pages |
 | پاسخنامه changes live grading before evidence exists | — (eliminated) | Flag `GroundTruthGradingEnabled` ships in M1 default-off; grading behavior is inert until the M4 golden-set gate turns it on |
 | پاسخنامه conflicts with rubric (marks mismatch) | Medium | Per-criterion fallback prompt rule + rubric max_score caps enforced by validation + mismatch surfaced in flagged_ambiguities |
 | پاسخنامه reduces scores across the board (AI grades stricter against reference) | Medium | Golden-set gate before per-exam enable (M4) + per-exam opt-in flag + teacher review of flagged_ambiguities |
 
 ## 6. What the app becomes (summary)
 
-Same UI, same roles, same review flow, same grading quality rules — but underneath: **every file rendered once** (never per request), **every grading run a resumable job** (no 5-minute HTTP holds, bulk grading by default, ensemble in parallel), **every run provable** (artifact hashes + rubric/prompt versions = full lineage), and **every prompt/model change gated** by a golden-set eval using the teacher scores you already collect. Questions can carry the examiner's own **پاسخنامه** — the AI grades against the examiner's expected solution as the reference (with per-criterion fallback and rubric caps enforced), so grading is grounded in the examiner's intent, not just the model's knowledge. Token spend drops ~3–5× from image format alone; wall-clock for a 30-student exam drops ~4× from worker parallelism; and the day provider economics change, the item-bank + artifact foundation makes prompt caching / batch APIs a config change, not a rebuild.
+Same UI, same roles, same review flow, same grading quality rules — but underneath: **every file rendered once** (never per request), **every grading run a resumable job** (no 5-minute HTTP holds, bulk grading by default, ensemble in parallel), **every run provable** (artifact hashes + rubric/prompt versions = full lineage), and **every prompt/model change gated** by a golden-set eval using the teacher scores you already collect. Questions can carry the examiner's own **پاسخنامه** — the AI grades against the examiner's expected solution as the reference (with per-criterion fallback and rubric caps enforced), so grading is grounded in the examiner's intent, not just the model's knowledge. Teachers upload an entire class's answer sheets for a question as **one merged PDF** and the app splits it by printed header IDs through an OCR + confidence-gated review screen — 300 uploads become one. Token spend drops ~3–5× from image format alone; wall-clock for a 30-student exam drops ~4× from worker parallelism; and the day provider economics change, the item-bank + artifact foundation makes prompt caching / batch APIs a config change, not a rebuild.

@@ -16,17 +16,24 @@ public sealed class AnswersController : ControllerBase
 {
     private readonly IAnswerService _svc;
     private readonly IFileStorage _storage;
+    private readonly IArtifactStore _artifacts;
+    private readonly IIngestService _ingest;
     private readonly IAppDbContext _db;
+    private readonly IAuditLogger _audit;
     private readonly ILogger<AnswersController> _logger;
     private readonly CurrentUser _user;
     private readonly IAccessScopeService _scope;
 
-    public AnswersController(IAnswerService svc, IFileStorage storage, IAppDbContext db,
+    public AnswersController(IAnswerService svc, IFileStorage storage, IArtifactStore artifacts,
+        IIngestService ingest, IAppDbContext db, IAuditLogger audit,
         ILogger<AnswersController> logger, CurrentUser user, IAccessScopeService scope)
     {
         _svc = svc;
         _storage = storage;
+        _artifacts = artifacts;
+        _ingest = ingest;
         _db = db;
+        _audit = audit;
         _logger = logger;
         _user = user;
         _scope = scope;
@@ -91,42 +98,101 @@ public sealed class AnswersController : ControllerBase
 
         // One answer per (student, question): replace the previous file.
         var existing = await _db.Answers.FirstOrDefaultAsync(a => a.StudentId == studentId && a.QuestionId == questionId, ct);
-        if (existing is not null && !string.IsNullOrEmpty(existing.ImageStorageKey))
+        if (existing is not null && !string.IsNullOrEmpty(existing.ImageStorageKey) && !IsContentAddressed(existing.ImageStorageKey))
         {
             try { await _storage.DeleteAsync(existing.ImageStorageKey, ct); }
             catch (IOException ex) { _logger.LogWarning(ex, "Could not delete previous answer file {Key}", existing.ImageStorageKey); }
         }
 
-        var key = $"answers/{questionId:N}/{studentId:N}/{Guid.NewGuid():N}{ext}";
-        await using var stream = file.OpenReadStream();
-        await _storage.SaveAsync(stream, key, ct);
+        // Content-addressed original artifact (M1) — identical re-uploads dedup.
+        var artifact = await _artifacts.SaveOriginalAsync(file.OpenReadStream(), file.FileName, file.ContentType, ct);
 
         if (existing is not null)
         {
-            existing.ImageStorageKey = key;
+            existing.ImageStorageKey = artifact.StorageKey;
+            existing.OriginalArtifactId = artifact.Id;
             existing.FileName = Path.GetFileName(file.FileName);
             existing.ContentType = file.ContentType;
             existing.UploadedAt = DateTime.UtcNow;
             if (teacherScore.HasValue) existing.TeacherScore = teacherScore.Value;
             if (teacher2Score.HasValue) existing.Teacher2Score = teacher2Score.Value;
+            // Stale page references from the previous upload must not leak
+            // into grading — pages are rebuilt after ingest below.
+            await _db.AnswerPages.Where(p => p.AnswerId == existing.Id).ExecuteDeleteAsync(ct);
             await _db.SaveChangesAsync(ct);
+            await IngestAnswerPagesAsync(existing, artifact, ct);
             return Ok(await _svc.GetAsync(existing.Id, ct));
         }
 
-        var dto = await _svc.CreateAsync(new CreateAnswerRequest(
-            StudentId: studentId,
-            QuestionId: questionId,
-            ImageStorageKey: key,
-            TeacherScore: teacherScore,
-            Teacher2Score: teacher2Score), ct);
-
-        // Persist display metadata alongside the blob.
-        var entity = await _db.Answers.FirstAsync(a => a.Id == dto.Id, ct);
-        entity.FileName = Path.GetFileName(file.FileName);
-        entity.ContentType = file.ContentType;
+        var answer = new Answer
+        {
+            StudentId = studentId,
+            QuestionId = questionId,
+            ImageStorageKey = artifact.StorageKey,
+            OriginalArtifactId = artifact.Id,
+            FileName = Path.GetFileName(file.FileName),
+            ContentType = file.ContentType,
+            TeacherScore = teacherScore,
+            Teacher2Score = teacher2Score,
+        };
+        _db.Answers.Add(answer);
         await _db.SaveChangesAsync(ct);
+        await _audit.WriteAsync("AnswerUploaded", "Answer", answer.Id, _user.UserId,
+            new { answer.ImageStorageKey, answer.QuestionId, artifactId = artifact.Id });
 
-        return CreatedAtAction(nameof(Get), new { id = dto.Id }, dto);
+        await IngestAnswerPagesAsync(answer, artifact, ct);
+
+        return CreatedAtAction(nameof(Get), new { id = answer.Id }, await _svc.GetAsync(answer.Id, ct));
+    }
+
+    /// <summary>True when a storage key lives in the content-addressed blob
+    /// tree (shared, deduped — never safe to delete on replace).</summary>
+    private static bool IsContentAddressed(string key) =>
+        key.StartsWith("blobs/", StringComparison.Ordinal) || key.StartsWith("pages/", StringComparison.Ordinal);
+
+    /// <summary>Run ingest for a freshly uploaded answer and link the rendered
+    /// pages to the answer row (both formats). Best-effort: on failure grading
+    /// falls back to the legacy whole-file path.</summary>
+    private async Task IngestAnswerPagesAsync(Answer answer, Artifact artifact, CancellationToken ct)
+    {
+        try
+        {
+            if (!await _ingest.EnsureIngestedAsync(artifact.Id, "answer", ct)) return;
+            // For image uploads (PNG/JPG) the "pages" are the single original
+            // file re-registered per format — link whatever ingest produced.
+            var formats = await _db.Artifacts
+                .Where(a => a.ParentArtifactId == artifact.Id && a.Kind == "page")
+                .ToListAsync(ct);
+            // PNG/JPG originals pass through Python unchanged: both formats may
+            // point at the SAME content hash for JPEG sources. Distinct rows
+            // per (format) are expected; group by Format and keep order stable.
+            var order = 0;
+            foreach (var formatGroup in formats
+                .GroupBy(f => f.Format ?? "png200")
+                .OrderBy(g => g.Key == "png200" ? 0 : 1)) // png200 first (legacy preference)
+            {
+                foreach (var pageArtifact in formatGroup
+                    .OrderBy(a => a.PageNumber ?? 1)
+                    .ThenBy(a => a.CreatedAt))
+                {
+                    _db.AnswerPages.Add(new AnswerPage
+                    {
+                        AnswerId = answer.Id,
+                        ArtifactId = pageArtifact.Id,
+                        Format = formatGroup.Key,
+                        SortOrder = order,
+                    });
+                    order++;
+                }
+            }
+            await _db.SaveChangesAsync(ct);
+            // Page ordering within an answer uses SortOrder; artifact.PageNumber
+            // may belong to another document when dedup reused a row.
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Answer ingest/page-linking failed for artifact {ArtifactId} — legacy path remains", artifact.Id);
+        }
     }
 
     /// <summary>

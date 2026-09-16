@@ -5,9 +5,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /srv
 
-# Java-free PDF rendering needs poppler (pdf2image dependency)
+# Java-free PDF rendering needs poppler (pdf2image dependency).
+# M6 bulk split: tesseract OCR with the Persian (fas) + English language
+# packs powers the header-band student-number read.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends poppler-utils curl \
+    && apt-get install -y --no-install-recommends poppler-utils curl tesseract-ocr tesseract-ocr-fas tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

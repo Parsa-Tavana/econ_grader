@@ -8,6 +8,7 @@ import StudentsPage from "./pages/StudentsPage";
 import StudentDetailPage from "./pages/StudentDetailPage";
 import QueuePage from "./pages/QueuePage";
 import WorkspacePage from "./pages/WorkspacePage";
+import BulkUploadPage from "./pages/BulkUploadPage";
 import EvaluationPage from "./pages/EvaluationPage";
 import AuditPage from "./pages/AuditPage";
 import SettingsPage from "./pages/SettingsPage";
@@ -44,6 +45,7 @@ export default function App() {
           <Route path="students" element={<StudentsPage />} />
           <Route path="students/:studentId" element={<StudentDetailPage />} />
           <Route path="grading/queue" element={<QueuePage />} />
+          <Route path="grading/bulk" element={<BulkUploadPage />} />
           <Route path="grading/workspace/:answerId" element={<WorkspacePage />} />
           <Route path="evaluation" element={<EvaluationPage />} />
           <Route element={<RequireAdmin />}>

@@ -20,13 +20,16 @@ public sealed class ExamsController : ControllerBase
     private readonly CurrentUser _user;
     private readonly IAppDbContext _db;
     private readonly IFileStorage _storage;
+    private readonly IArtifactStore _artifacts;
+    private readonly IIngestService _ingest;
     private readonly IAuditLogger _audit;
     private readonly IExamExtractionService _extraction;
     private readonly ILogger<ExamsController> _logger;
 
     public ExamsController(
         IExamService svc, IAccessScopeService scope, CurrentUser user, IAppDbContext db,
-        IFileStorage storage, IAuditLogger audit, IExamExtractionService extraction,
+        IFileStorage storage, IArtifactStore artifacts, IIngestService ingest,
+        IAuditLogger audit, IExamExtractionService extraction,
         ILogger<ExamsController> logger)
     {
         _svc = svc;
@@ -34,6 +37,8 @@ public sealed class ExamsController : ControllerBase
         _user = user;
         _db = db;
         _storage = storage;
+        _artifacts = artifacts;
+        _ingest = ingest;
         _audit = audit;
         _extraction = extraction;
         _logger = logger;
@@ -112,25 +117,53 @@ public sealed class ExamsController : ControllerBase
         var exam = await _db.Exams.FindAsync([id], ct);
         if (exam is null) return NotFound();
 
-        // Delete the previous file to avoid orphaned blobs.
-        if (!string.IsNullOrEmpty(exam.RubricFileStorageKey))
+        // Content-addressed original artifact (M1): identical re-uploads dedup
+        // to the same blob + artifact row. The legacy storage-key columns keep
+        // working (they hold the same content-addressed key now).
+        var artifact = await _artifacts.SaveOriginalAsync(file.OpenReadStream(), file.FileName, file.ContentType, ct);
+
+        // Delete the previous file to avoid orphaned blobs (only when it is a
+        // legacy key — content-addressed blobs are shared and never deleted).
+        if (!string.IsNullOrEmpty(exam.RubricFileStorageKey) && !IsContentAddressed(exam.RubricFileStorageKey!))
         {
             try { await _storage.DeleteAsync(exam.RubricFileStorageKey, ct); }
             catch (IOException ex) { _logger.LogWarning(ex, "Could not delete previous exam rubric file {Key}", exam.RubricFileStorageKey); }
         }
 
-        var key = $"rubrics/exams/{id:N}/{Guid.NewGuid():N}{ext}";
-        await using var stream = file.OpenReadStream();
-        await _storage.SaveAsync(stream, key, ct);
-
-        exam.RubricFileStorageKey = key;
+        exam.RubricFileStorageKey = artifact.StorageKey;
+        exam.RubricFileArtifactId = artifact.Id;
         exam.RubricFileName = Path.GetFileName(file.FileName); // strip any path segments
         exam.RubricFileContentType = file.ContentType;
         await _db.SaveChangesAsync(ct);
 
-        await _audit.WriteAsync("ExamRubricFileUploaded", "Exam", id, _user.UserId, new { exam.RubricFileName, bytes = file.Length }, cancellationToken: ct);
+        // Ingest runs synchronously after upload — rendering once here keeps
+        // /extract and grading on pre-rendered pages (foundation plan M1).
+        await IngestQuietlyAsync(artifact.Id, "rubric", ct);
+
+        await _audit.WriteAsync("ExamRubricFileUploaded", "Exam", id, _user.UserId, new { exam.RubricFileName, bytes = file.Length, artifactId = artifact.Id }, cancellationToken: ct);
         _logger.LogInformation("Exam rubric file uploaded {ExamId} {FileName} ({Bytes} bytes)", id, exam.RubricFileName, file.Length);
         return Ok(new { fileName = exam.RubricFileName, contentType = exam.RubricFileContentType });
+    }
+
+    /// <summary>True when a storage key lives in the content-addressed blob
+    /// tree (shared, deduped — never safe to delete on replace).</summary>
+    private static bool IsContentAddressed(string key) =>
+        key.StartsWith("blobs/", StringComparison.Ordinal) || key.StartsWith("pages/", StringComparison.Ordinal);
+
+    /// <summary>Fire-and-forget-ish ingest used right after an upload: runs the
+    /// pipeline synchronously but never fails the upload when the render
+    /// pipeline is unavailable — grading falls back to the legacy whole-file
+    /// path in that case.</summary>
+    private async Task IngestQuietlyAsync(Guid artifactId, string role, CancellationToken ct)
+    {
+        try
+        {
+            await _ingest.EnsureIngestedAsync(artifactId, role, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Post-upload ingest failed for artifact {ArtifactId} (role {Role}) — legacy file path will be used", artifactId, role);
+        }
     }
 
     /// <summary>Download/stream the stored exam-wide rubric document.</summary>
@@ -159,10 +192,16 @@ public sealed class ExamsController : ControllerBase
         if (exam is null) return NotFound();
         if (string.IsNullOrEmpty(exam.RubricFileStorageKey)) return NoContent();
 
-        try { await _storage.DeleteAsync(exam.RubricFileStorageKey, ct); }
-        catch (IOException ex) { _logger.LogWarning(ex, "Could not delete exam rubric file {Key}", exam.RubricFileStorageKey); }
+        // Content-addressed blobs are shared/deduped — deleting the exam's
+        // reference never deletes the blob; legacy keys are the owner's file.
+        if (!IsContentAddressed(exam.RubricFileStorageKey!))
+        {
+            try { await _storage.DeleteAsync(exam.RubricFileStorageKey, ct); }
+            catch (IOException ex) { _logger.LogWarning(ex, "Could not delete exam rubric file {Key}", exam.RubricFileStorageKey); }
+        }
 
         exam.RubricFileStorageKey = null;
+        exam.RubricFileArtifactId = null;
         exam.RubricFileName = null;
         exam.RubricFileContentType = null;
         await _db.SaveChangesAsync(ct);
@@ -197,6 +236,25 @@ public sealed class ExamsController : ControllerBase
     {
         await _scope.AssertExamAccessAsync(_user, id, writeAccess: true, ct);
         return Ok(await _extraction.ApplyAsync(id, request, _user.UserId, ct));
+    }
+
+    /// <summary>Toggle the پاسخنامه grading gate for this exam. When ON, every
+    /// question with a پاسخنامه has its model-answer pages sent to the grader
+    /// as the reference. Default OFF — flip per exam only after the M4
+    /// golden-set gate confirms no regression.</summary>
+    [HttpPut("{id:guid}/ground-truth-grading")]
+    [Authorize(Roles = nameof(UserRole.Teacher))]
+    public async Task<IActionResult> SetGroundTruthGrading(
+        Guid id, [FromBody] SetGroundTruthGradingRequest request, CancellationToken ct)
+    {
+        await _scope.AssertExamAccessAsync(_user, id, writeAccess: true, ct);
+        var exam = await _db.Exams.FindAsync([id], ct);
+        if (exam is null) return NotFound();
+        exam.GroundTruthGradingEnabled = request.Enabled;
+        await _db.SaveChangesAsync(ct);
+        await _audit.WriteAsync("GroundTruthGradingToggled", "Exam", id, _user.UserId,
+            new { enabled = request.Enabled });
+        return Ok(new { groundTruthGradingEnabled = exam.GroundTruthGradingEnabled });
     }
 
     // ── Corrector assignment (exam owner / admin only) ──────────────────────
@@ -266,3 +324,4 @@ public sealed class ExamsController : ControllerBase
 
 public record AssignCorrectorRequest(Guid CorrectorUserId);
 public record CorrectorAssignmentDto(Guid UserId, string Email, string DisplayName, DateTime AssignedAt);
+public record SetGroundTruthGradingRequest(bool Enabled);

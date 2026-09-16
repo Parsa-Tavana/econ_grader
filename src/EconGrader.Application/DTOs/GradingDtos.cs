@@ -26,7 +26,11 @@ public record GradingRunSummaryDetailDto(
     int OutputTokens,
     decimal EstimatedCost,
     string? Error,
-    DateTime CreatedAt)
+    DateTime CreatedAt,
+    /// <summary>M1/M4 lineage — the artifacts this run consumed
+    /// ([{kind, role, sha256, page?}]). Kept at the end so positional
+    /// construction sites stay source-compatible.</summary>
+    string? InputArtifactsJson = null)
 {
     public static GradingRunSummaryDetailDto From(GradingRun r) => new(
         r.Id, r.AnswerId, r.QuestionId, r.StudentId,
@@ -34,7 +38,7 @@ public record GradingRunSummaryDetailDto(
         r.Temperature, r.PromptVersion, r.AiScore, r.TeacherScoreSnapshot,
         r.IsValid, r.CriteriaScoresJson, r.Reasoning,
         r.LatencyMs, r.InputTokens, r.OutputTokens, r.EstimatedCost,
-        r.Error, r.CreatedAt);
+        r.Error, r.CreatedAt, r.InputArtifactsJson);
 }
 
 /// <summary>
@@ -124,3 +128,70 @@ public record ExtractionCriterion(
     [property: JsonPropertyName("description")] string Description,
     [property: JsonPropertyName("max_score")] decimal MaxScore
 );
+
+/// <summary>
+/// Mirrors the Python /ingest response — one page, one format at a time.
+/// Every property needs an explicit attribute (short keys like "id" pattern);
+/// sha256 is the hash of the payload's own bytes (content address).
+/// </summary>
+public record IngestServiceResponse(
+    [property: JsonPropertyName("pages")] IReadOnlyList<IngestPage> Pages,
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("total_pages")] int TotalPages,
+    [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings
+);
+
+public record IngestPage(
+    [property: JsonPropertyName("page_number")] int PageNumber,
+    [property: JsonPropertyName("width")] int Width,
+    [property: JsonPropertyName("height")] int Height,
+    [property: JsonPropertyName("formats")] IReadOnlyList<IngestPageFormat> Formats
+);
+
+public record IngestPageFormat(
+    [property: JsonPropertyName("format")] string Format,
+    [property: JsonPropertyName("sha256")] string Sha256,
+    [property: JsonPropertyName("media_type")] string MediaType,
+    [property: JsonPropertyName("data_b64")] string DataB64
+);
+
+/// <summary>
+/// Mirrors the Python /split-header response (M6 bulk split). Per-page OCR
+/// facts only — grouping lives on the .NET side. Explicit short-key
+/// attributes like every other Python-facing record here.
+/// </summary>
+public record SplitHeaderResponse(
+    [property: JsonPropertyName("pages")] IReadOnlyList<SplitHeaderPage> Pages,
+    [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings
+);
+
+public record SplitHeaderPage(
+    [property: JsonPropertyName("page_number")] int PageNumber,
+    [property: JsonPropertyName("raw_id")] string? RawId,
+    [property: JsonPropertyName("confidence")] decimal Confidence,
+    [property: JsonPropertyName("ocr_text")] string OcrText
+);
+/// <summary>
+/// Queue-mode job view (M2). CamelCase JSON via the API's global policy —
+/// no snake_case attributes needed (internal contract, not the Python one).
+/// </summary>
+public record GradingJobDto(
+    Guid Id,
+    Guid AnswerId,
+    decimal Temperature,
+    string PromptVersion,
+    int EnsembleIndex,
+    string Status,
+    int Attempts,
+    string? ErrorKind,
+    string? Error,
+    DateTime? StartedAt,
+    DateTime? FinishedAt,
+    Guid? GradingRunId,
+    DateTime CreatedAt)
+{
+    public static GradingJobDto From(GradingJob j) => new(
+        j.Id, j.AnswerId, j.Temperature, j.PromptVersion, j.EnsembleIndex,
+        j.Status, j.Attempts, j.ErrorKind, j.Error,
+        j.StartedAt, j.FinishedAt, j.GradingRunId, j.CreatedAt);
+}

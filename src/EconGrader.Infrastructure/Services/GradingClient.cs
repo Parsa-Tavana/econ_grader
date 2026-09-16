@@ -105,6 +105,55 @@ public sealed class GradingClient : IGradingClient
         return parsed;
     }
 
+    public async Task<IngestServiceResponse> IngestAsync(
+        string absoluteFilePath, IReadOnlyList<string>? formats = null, int? maxPages = null,
+        int? pageOffset = null, CancellationToken ct = default)
+    {
+        var payload = new
+        {
+            path = absoluteFilePath,
+            formats = formats,   // null → Python defaults to both png200 + jpeg150
+            max_pages = maxPages,
+            page_offset = pageOffset,  // M6 bulk-split windowing; null → 0
+        };
+
+        var resp = await _http.PostAsJsonAsync("/ingest", payload, _json, ct);
+        var body = await resp.Content.ReadAsStringAsync(ct);
+        if (!resp.IsSuccessStatusCode)
+        {
+            _logger.LogError("Ingest service returned {Status}: {Body}", resp.StatusCode, body);
+            throw new HttpRequestException($"Grading service ingest error {resp.StatusCode}: {body}");
+        }
+
+        var parsed = JsonSerializer.Deserialize<IngestServiceResponse>(body, _extractJson);
+        if (parsed is null)
+            throw new DependencyException("GradingService", "Failed to deserialize ingest response");
+        return parsed;
+    }
+
+    public async Task<SplitHeaderResponse> SplitHeaderAsync(
+        IReadOnlyList<string> absolutePagePaths, decimal? headerBandPct = null, CancellationToken ct = default)
+    {
+        var payload = new
+        {
+            page_paths = absolutePagePaths,
+            header_band_pct = headerBandPct,   // null → Python default (SPLIT_HEADER_BAND_PCT)
+        };
+
+        var resp = await _http.PostAsJsonAsync("/split-header", payload, _json, ct);
+        var body = await resp.Content.ReadAsStringAsync(ct);
+        if (!resp.IsSuccessStatusCode)
+        {
+            _logger.LogError("Split-header service returned {Status}: {Body}", resp.StatusCode, body);
+            throw new HttpRequestException($"Grading service split-header error {resp.StatusCode}: {body}");
+        }
+
+        var parsed = JsonSerializer.Deserialize<SplitHeaderResponse>(body, _extractJson);
+        if (parsed is null)
+            throw new DependencyException("GradingService", "Failed to deserialize split-header response");
+        return parsed;
+    }
+
     public async Task<TEvaluationResult?> EvaluateAsync(IEnumerable<(decimal TeacherScore, decimal AiScore)> runs, CancellationToken ct = default)
     {
         var payload = new

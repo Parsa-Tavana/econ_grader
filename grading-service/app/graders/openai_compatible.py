@@ -3,6 +3,20 @@
 `OpenAICompatibleGrader` is the engine: any /chat/completions gateway with a
 configurable auth scheme. Concrete slots (GLM, GPT) are thin subclasses in
 their own modules injecting their own settings.
+
+Requests use SSE streaming by default. Reason: fronting gateways (e.g.
+ArvanCloud) cut connections that go silent for ~60s with a 504 or a truncated
+chunked body, while vision grading legitimately takes minutes before the
+FIRST token. Streaming keeps bytes flowing and defeats the idle timeout.
+Set the env var GLM_STREAMING=0 (or GPT_STREAMING=0) to fall back to
+non-streaming for a provider that mishandles SSE.
+
+M5 payload hygiene:
+- `response_format: {"type": "json_object"}` on every call (config toggle
+  RESPONSE_FORMAT_JSON_OBJECT) — gateway-side JSON mode cuts parse failures;
+  the hardened parser stays as the fallback.
+- Message ordering is prefix-stable: system → question text + rubric →
+  question paper pages → student material last.
 """
 from __future__ import annotations
 
@@ -42,6 +56,70 @@ def _parse_response_body(resp: httpx.Response) -> dict[str, Any]:
         body = body["data"]
     return body
 
+
+def _parse_stream_body(resp: httpx.Response) -> dict[str, Any]:
+    """Consume an SSE /chat/completions stream and reconstruct a single
+    response-shaped dict (same keys the non-streaming path returns).
+
+    - accumulates choices[*].delta.content into message.content
+    - ignores delta.reasoning_content (thinking models) — it must not leak
+      into the graded JSON
+    - picks up usage from the final chunk when the gateway sends it
+      (OpenAI-compatible gateways honour stream_options.include_usage)
+    - raises httpx.HTTPStatusError-shaped semantics: a non-200 start or an
+      in-band {"error": ...} chunk is surfaced as an exception so callers'
+      existing error/retry handling keeps working
+    """
+    if resp.status_code != 200:
+        resp.raise_for_status()
+
+    content_parts: list[str] = []
+    usage: dict[str, Any] = {}
+    finish_reason: str | None = None
+    model_name: str | None = None
+
+    for line in resp.iter_lines():
+        if not line or not line.startswith("data:"):
+            continue
+        payload = line[len("data:"):].strip()
+        if payload == "[DONE]":
+            break
+        try:
+            chunk = json.loads(payload)
+        except json.JSONDecodeError:
+            continue  # tolerate keep-alives / partial frames
+        if not isinstance(chunk, dict):
+            continue
+        if isinstance(chunk.get("error"), (dict, str)):
+            err = chunk["error"]
+            detail = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+            raise RuntimeError(f"gateway stream error: {detail}")
+        model_name = model_name or chunk.get("model")
+        if isinstance(chunk.get("usage"), dict) and chunk["usage"]:
+            usage = chunk["usage"]
+        for choice in chunk.get("choices") or []:
+            delta = choice.get("delta") or {}
+            piece = delta.get("content")
+            if piece:
+                content_parts.append(piece)
+            fr = choice.get("finish_reason")
+            if fr:
+                finish_reason = fr
+
+    raw_text = "".join(content_parts)
+    if not raw_text and not usage:
+        # Stream ended with nothing at all — treat like an empty non-stream body.
+        raise RuntimeError("gateway stream produced no content")
+
+    return {
+        "model": model_name,
+        "choices": [{
+            "message": {"content": raw_text},
+            "finish_reason": finish_reason,
+        }],
+        "usage": usage,
+    }
+
 SYSTEM_PROMPT = (
     "You are a careful exam grader. Respond with JSON only. "
     "No markdown fences, no explanation outside JSON. "
@@ -69,6 +147,7 @@ class OpenAICompatibleGrader(IVisionGrader):
         api_key: str,
         model: str,
         auth_scheme: str = "Bearer",
+        streaming: bool = True,
     ) -> None:
         self.provider_label = provider_label
         self.model_name = model
@@ -77,6 +156,67 @@ class OpenAICompatibleGrader(IVisionGrader):
         self._api_key = api_key
         self._model = model
         self._auth_scheme = (auth_scheme or "Bearer").strip()
+        self._streaming = streaming
+
+    def _chat(
+        self,
+        *,
+        system_prompt: str,
+        content: list[dict[str, Any]],
+        temperature: float,
+        max_tokens: int,
+        non_stream_timeout: float,
+    ) -> dict[str, Any]:
+        """POST /chat/completions and return a response-shaped dict
+        ({choices:[{message:{content}}], usage:{...}}) regardless of mode.
+
+        Streaming is the default (see module docstring): bytes flow while the
+        model thinks, so an idle-timeout gateway never kills the request. The
+        read timeout still applies per-chunk — a gateway that goes silent
+        mid-stream fails fast and the caller's transient-retry handles it.
+        """
+        payload: dict[str, Any] = {
+            "model": self._model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": content},
+            ],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        # M5: JSON mode at the gateway — the model is constrained to emit a
+        # single JSON object, cutting parse failures (and thus full-payload
+        # retries). The hardened parser below stays as the fallback for
+        # gateways that ignore the parameter.
+        if settings.RESPONSE_FORMAT_JSON_OBJECT:
+            payload["response_format"] = {"type": "json_object"}
+        headers = {
+            "Authorization": f"{self._auth_scheme} {self._api_key}",
+            "Content-Type": "application/json",
+        }
+        if self._streaming:
+            payload["stream"] = True
+            # Gateways that honour it put usage in the final chunk; those that
+            # don't simply return no usage and token counts stay zero.
+            payload["stream_options"] = {"include_usage": True}
+            # No overall cap: .NET's 315s attempt timeout is the budget.
+            # read=75 → gap between chunks; write=60 → uploading base64 pages.
+            timeout = httpx.Timeout(connect=15.0, read=75.0, write=60.0, pool=15.0)
+            with httpx.stream(
+                "POST", f"{self._base_url}/chat/completions",
+                headers=headers, json=payload, timeout=timeout,
+            ) as resp:
+                if resp.status_code != 200:
+                    resp.read()  # pull the error body for the log
+                body = _parse_stream_body(resp)
+        else:
+            resp = httpx.post(
+                f"{self._base_url}/chat/completions",
+                headers=headers, json=payload, timeout=non_stream_timeout,
+            )
+            resp.raise_for_status()
+            body = _parse_response_body(resp)
+        return body
 
     def grade(
         self,
@@ -95,12 +235,12 @@ class OpenAICompatibleGrader(IVisionGrader):
         prompt_text = load_prompt(prompt_version)
 
         content: list[dict[str, Any]] = []
-        # Order matters: question paper → student answer → prompt.
-        # Each image group gets an explicit TEXT label. Without one the model
-        # receives an anonymous stack of pages and can attribute printed
-        # question-paper figures (graphs, tables) to the student's own work
-        # (observed live: a model "saw a diagram in the student answer" that
-        # was actually printed on the question paper).
+        # M5 message ordering (prefix-stable for future cache providers):
+        # system → question text + rubric → question paper pages → student
+        # material LAST. Pages still get explicit TEXT labels — without one
+        # the model receives an anonymous stack of pages and can attribute
+        # printed question-paper figures (graphs, tables) to the student's
+        # own work (observed live).
         def _img(data: bytes, media_type: str) -> dict[str, Any]:
             return {"type": "image_url", "image_url": {
                 "url": f"data:{media_type};base64,{base64.b64encode(data).decode()}"
@@ -109,11 +249,20 @@ class OpenAICompatibleGrader(IVisionGrader):
         def _txt(value: str) -> dict[str, Any]:
             return {"type": "text", "text": value}
 
+        # 1) Question statement + rubric — text first, before any image.
+        content.append({"type": "text", "text": prompt_text.format(
+            question_text=question_text,
+            rubric_json=json.dumps(rubric, indent=2),
+            max_score=max_score,
+        )})
+        # 2) Question paper (the printed exam sheet — NOT the student's work).
         if question_images:
             content.append(_txt(
                 "IMAGES OF THE QUESTION PAPER (the printed exam sheet — NOT the student's work):"
             ))
             content.extend(_img(d, mt) for d, mt in question_images)
+        # 3) Student's handwritten answer — LAST so it sits nearest to the
+        # generation point.
         if answer_images:
             content.append(_txt(
                 "IMAGES OF THE STUDENT'S HANDWRITTEN ANSWER — grade ONLY what the student "
@@ -127,32 +276,15 @@ class OpenAICompatibleGrader(IVisionGrader):
         if extra_text.strip():
             # Extracted text from the student's typed answer documents
             content.append(_txt(f"Student typed answer documents:\n{extra_text.strip()}"))
-        content.append({"type": "text", "text": prompt_text.format(
-            question_text=question_text,
-            rubric_json=json.dumps(rubric, indent=2),
-            max_score=max_score,
-        )})
 
         try:
-            resp = httpx.post(
-                f"{self._base_url}/chat/completions",
-                headers={
-                    "Authorization": f"{self._auth_scheme} {self._api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": model_name,
-                    "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": content},
-                    ],
-                    "temperature": temperature,
-                    "max_tokens": settings.DEFAULT_MAX_TOKENS,
-                },
-                timeout=140.0,
+            body = self._chat(
+                system_prompt=SYSTEM_PROMPT,
+                content=content,
+                temperature=temperature,
+                max_tokens=settings.DEFAULT_MAX_TOKENS,
+                non_stream_timeout=140.0,
             )
-            resp.raise_for_status()
-            body = _parse_response_body(resp)
             raw_text: str = body["choices"][0]["message"]["content"]
             latency_ms = int((time.time() - start_ms) * 1000)
             parsed = self._parse_response(raw_text)
@@ -247,25 +379,13 @@ class OpenAICompatibleGrader(IVisionGrader):
         )})
 
         try:
-            resp = httpx.post(
-                f"{self._base_url}/chat/completions",
-                headers={
-                    "Authorization": f"{self._auth_scheme} {self._api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": model_name,
-                    "messages": [
-                        {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
-                        {"role": "user", "content": content},
-                    ],
-                    "temperature": temperature,
-                    "max_tokens": settings.EXTRACTION_MAX_TOKENS,
-                },
-                timeout=settings.EXTRACTION_TIMEOUT_SECONDS,
+            body = self._chat(
+                system_prompt=EXTRACTION_SYSTEM_PROMPT,
+                content=content,
+                temperature=temperature,
+                max_tokens=settings.EXTRACTION_MAX_TOKENS,
+                non_stream_timeout=settings.EXTRACTION_TIMEOUT_SECONDS,
             )
-            resp.raise_for_status()
-            body = _parse_response_body(resp)
             raw_text: str = body["choices"][0]["message"]["content"]
             latency_ms = int((time.time() - start_ms) * 1000)
             parsed = self._parse_response(raw_text)

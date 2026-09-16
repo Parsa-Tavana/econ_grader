@@ -108,3 +108,58 @@ class HealthResponse(BaseModel):
 class EvaluationRequest(BaseModel):
     """Request to compute evaluation metrics over a set of runs."""
     runs: list[dict[str, Any]]  # each: {ai_score, teacher_score}
+
+
+class IngestFormatOut(BaseModel):
+    """One rendered form of a page: content hash + base64 payload.
+
+    sha256 is the hash of THIS payload's bytes (not the parent document) —
+    that is what lets the .NET side dedup identical rendered pages across
+    different documents by content address alone.
+    """
+    format: str  # png200 | jpeg150
+    sha256: str
+    media_type: str
+    data_b64: str
+
+
+class IngestPageOut(BaseModel):
+    page_number: int
+    width: int
+    height: int
+    formats: list[IngestFormatOut]
+
+
+class IngestRequest(BaseModel):
+    """Render/normalize ONE uploaded document at ingest time (M1 pipeline)."""
+    path: str = Field(..., description="Absolute path on the shared storage volume")
+    formats: list[str] = Field(default_factory=lambda: ["png200", "jpeg150"],
+                               description="Which page formats to render: png200 and/or jpeg150")
+    max_pages: Optional[int] = Field(default=None, description="Page cap; defaults to EXTRACT_MAX_PAGES")
+    page_offset: int = Field(default=0, ge=0, description="Skip the first N pages (M6 bulk-split windowing: big merged PDFs are ingested in slices); response page numbers remain source-document positions")
+
+
+class IngestResponse(BaseModel):
+    pages: list[IngestPageOut] = Field(default_factory=list)
+    text: str = ""              # extracted DOCX/XLSX text ("" for PDFs/images)
+    total_pages: int = 0        # total pages in the SOURCE document (0 for text-only docs)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class SplitHeaderRequest(BaseModel):
+    """M6 bulk split: OCR the header band of already-ingested answer pages."""
+    page_paths: list[str] = Field(..., description="Absolute paths of page images (PNG/JPG) on the shared volume, in page order")
+    header_band_pct: Optional[float] = Field(default=None, description="Top % of the page treated as the header band; defaults to SPLIT_HEADER_BAND_PCT")
+
+
+class SplitHeaderPageOut(BaseModel):
+    """Per-page OCR facts — no grouping here; the .NET layer groups."""
+    page_number: int
+    raw_id: Optional[str] = None      # normalized student id, None = unreadable
+    confidence: float = 0.0           # 0..1, from tesseract word confidences
+    ocr_text: str = ""                # raw header text (auditable, truncated)
+
+
+class SplitHeaderResponse(BaseModel):
+    pages: list[SplitHeaderPageOut] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)

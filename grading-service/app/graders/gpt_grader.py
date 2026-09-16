@@ -16,4 +16,5 @@ class GptVisionGrader(OpenAICompatibleGrader):
             api_key=settings.GPT_API_KEY,
             model=settings.GPT_MODEL or settings.MODEL_NAME,
             auth_scheme=settings.GPT_AUTH_SCHEME,
+            streaming=settings.GPT_STREAMING,
         )

@@ -1,17 +1,19 @@
-import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ArrowRight, Filter } from "lucide-react";
+import { ArrowRight, Filter, Play } from "lucide-react";
 import { listExams } from "../api/exams";
 import { listQuestionsByExam } from "../api/questions";
 import { listAnswersByQuestion } from "../api/answers";
+import { bulkGrade, listGradingJobs, type GradingJobDto } from "../api/grading";
 import {
   PageHeader,
   Card,
   CardHeader,
   Select,
   Field,
+  Button,
   LoadingBlock,
   ErrorState,
   EmptyState,
@@ -19,14 +21,22 @@ import {
   traceIdOf,
 } from "../components/ui";
 import { AnswerStatusBadge } from "../components/common";
+import { apiErrorMessage } from "../api/client";
 import { formatScore } from "../utils/format";
 import { currentLang } from "../hooks/useLang";
+import { useToast } from "../hooks/useToast";
+import { getAuthUser } from "../api/auth";
+import { hasRole } from "../utils/roles";
 
 export default function QueuePage() {
   const { t } = useTranslation();
   const lang = currentLang();
   const navigate = useNavigate();
   const [params] = useSearchParams();
+  const qc = useQueryClient();
+  const toast = useToast();
+  // Bulk grading is Teacher-only server-side ([Authorize(Roles=Teacher)]).
+  const canManage = hasRole(getAuthUser(), "Teacher");
 
   const examsQ = useQuery({ queryKey: ["exams"], queryFn: listExams });
   const [examId, setExamId] = useState<string>(params.get("examId") ?? "");
@@ -68,13 +78,67 @@ export default function QueuePage() {
     });
   }, [answersQ.data, statusFilter]);
 
+  // ── Live job status (M2/M3): poll queued jobs for this scope every 3s and
+  // refresh answers when anything completes, so the chips stay truthful.
+  const jobsQ = useQuery({
+    queryKey: ["gradingJobs", effectiveExamId, effectiveQuestionId],
+    queryFn: () =>
+      listGradingJobs(
+        effectiveQuestionId ? { questionId: effectiveQuestionId } : { examId: effectiveExamId }
+      ),
+    enabled: !!effectiveExamId,
+    refetchInterval: 3000,
+  });
+  const activeJobCount = (jobsQ.data ?? []).filter(
+    (j) => j.status === "pending" || j.status === "running"
+  ).length;
+  useEffect(() => {
+    if (jobsQ.data?.some((j) => j.status === "completed")) {
+      qc.invalidateQueries({ queryKey: ["answers", "question", effectiveQuestionId] });
+    }
+  }, [jobsQ.data, effectiveQuestionId, qc]);
+
+  // ── Grade-all (M3): exam- or question-scope bulk enqueue.
+  const bulkMut = useMutation({
+    mutationFn: () =>
+      bulkGrade(
+        effectiveQuestionId
+          ? { examId: effectiveExamId, questionId: effectiveQuestionId }
+          : { examId: effectiveExamId }
+      ),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["gradingJobs"] });
+      toast.success(
+        res.enqueued > 0
+          ? t("queue.bulkEnqueued", { count: res.enqueued, skipped: res.skipped })
+          : t("queue.bulkNothing", { skipped: res.skipped })
+      );
+    },
+    onError: (e) => toast.error(friendlyError(apiErrorMessage(e), t)),
+  });
+
   if (examsQ.isLoading) return <LoadingBlock />;
   if (examsQ.isError)
     return <ErrorState message={friendlyError(examsQ.error, t)} onRetry={() => examsQ.refetch()} />;
 
   return (
     <>
-      <PageHeader title={t("queue.title")} subtitle={t("queue.subtitle")} />
+      <PageHeader
+        title={t("queue.title")}
+        subtitle={t("queue.subtitle")}
+        action={
+          canManage && effectiveExamId ? (
+            <Button
+              loading={bulkMut.isPending}
+              onClick={() => bulkMut.mutate()}
+              title={t("queue.gradeAllHint")}
+            >
+              <Play size={15} /> {t("queue.gradeAll")}
+              {activeJobCount > 0 ? ` (${activeJobCount})` : ""}
+            </Button>
+          ) : undefined
+        }
+      />
 
       {/* Filters */}
       <Card className="mb-5">
@@ -145,6 +209,11 @@ export default function QueuePage() {
             const latest = [...(a.gradingRuns ?? [])].sort(
               (x, y) => +new Date(y.createdAt) - +new Date(x.createdAt)
             )[0];
+            // Live queue chips (M2/M3): pending/running/failed jobs for THIS answer.
+            const myJobs = (jobsQ.data ?? []).filter((j) => j.answerId === a.id);
+            const chip = myJobs.find((j) => j.status === "running")
+              ?? myJobs.find((j) => j.status === "pending")
+              ?? myJobs.find((j) => j.status === "failed");
             return (
               <button
                 key={a.id}
@@ -157,6 +226,7 @@ export default function QueuePage() {
                   </span>
                   <AnswerStatusBadge answer={a} />
                 </div>
+                {chip ? <JobChip job={chip} /> : null}
                 <div className="flex items-center justify-between text-xs text-zinc-500">
                   <span>
                     AI:{' '}
@@ -186,4 +256,34 @@ export default function QueuePage() {
       </p>
     </>
   );
+}
+
+/** Live per-answer queue chip (M2/M3) — queued / grading / failed. */
+function JobChip({ job }: { job: GradingJobDto }) {
+  const { t } = useTranslation();
+  if (job.status === "running")
+    return (
+      <div className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-primary-700">
+        <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-primary-600" />
+        {t("queue.jobGrading")}
+      </div>
+    );
+  if (job.status === "pending")
+    return (
+      <div className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-amber-600">
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
+        {t("queue.jobQueued")}
+      </div>
+    );
+  if (job.status === "failed")
+    return (
+      <div
+        className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-red-600"
+        title={job.error ?? undefined}
+      >
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-500" />
+        {t("queue.jobFailed")}
+      </div>
+    );
+  return null;
 }

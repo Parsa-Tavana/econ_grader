@@ -62,3 +62,27 @@ export function questionFileUrl(questionId: string): string {
 export async function deleteQuestionFile(questionId: string): Promise<void> {
   await api.delete(`/questions/${questionId}/file`);
 }
+
+// ── پاسخنامه (model answer / answer key) — M3 ──────────────────────────────
+
+export interface AnswerKeyMetaDto {
+  answerKeyStorageKey: string | null;
+  answerKeyFileName: string | null;
+  answerKeyContentType: string | null;
+}
+
+export async function uploadAnswerKey(questionId: string, file: File): Promise<AnswerKeyMetaDto> {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post<AnswerKeyMetaDto>(`/questions/${questionId}/answerkey`, form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}
+export async function deleteAnswerKey(questionId: string): Promise<void> {
+  await api.delete(`/questions/${questionId}/answerkey`);
+}
+/** Authenticated stream URL — pass to fetchAuthenticatedFile, never <a href>. */
+export function answerKeyUrl(questionId: string): string {
+  return `/questions/${questionId}/answerkey`;
+}
