@@ -372,7 +372,7 @@ export default function BulkUploadPage() {
               <option value="">{t("questions.pickQuestion")}</option>
               {(questionsQ.data ?? []).map((q) => (
                 <option key={q.id} value={q.id}>
-                  {t("questions.questionN", { n: q.number })}
+                  {t("questions.questionN", { number: q.number })}
                 </option>
               ))}
             </Select>

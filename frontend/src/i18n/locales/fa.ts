@@ -16,6 +16,8 @@ const fa = {
     settings: "تنظیمات",
   },
   common: {
+    exam: "آزمون",
+    question: "سؤال",
     loading: "در حال بارگذاری...",
     error: "خطا",
     retry: "تلاش دوباره",
@@ -112,6 +114,7 @@ const fa = {
     studentsCount: "دانش‌آموزان",
     gradingProgress: "پیشرفت تصحیح",
     openExam: "مشاهده آزمون",
+    selectExam: "یک آزمون انتخاب کنید",
     noExams: "هنوز آزمونی ایجاد نشده است",
     noExamsHint: "برای شروع کار، اولین آزمون خود را بسازید.",
     deleteWarning:

@@ -16,6 +16,8 @@ const en = {
     settings: "Settings",
   },
   common: {
+    exam: "Exam",
+    question: "Question",
     loading: "Loading...",
     error: "Error",
     retry: "Retry",
@@ -112,6 +114,7 @@ const en = {
     studentsCount: "Students",
     gradingProgress: "Grading progress",
     openExam: "Open exam",
+    selectExam: "Select an exam",
     noExams: "No exams have been created yet",
     noExamsHint: "Create your first exam to get started.",
     deleteWarning:
