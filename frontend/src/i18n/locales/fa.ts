@@ -148,6 +148,7 @@ const fa = {
   },
   questions: {
     title: "سؤالات آزمون",
+    pickQuestion: "یک سؤال انتخاب کنید",
     questionN: "سؤال {{number}}",
     addQuestion: "افزودن سؤال",
     editQuestion: "ویرایش سؤال",

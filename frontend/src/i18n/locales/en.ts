@@ -148,6 +148,7 @@ const en = {
   },
   questions: {
     title: "Exam questions",
+    pickQuestion: "Select a question",
     questionN: "Question {{number}}",
     addQuestion: "Add question",
     editQuestion: "Edit question",
