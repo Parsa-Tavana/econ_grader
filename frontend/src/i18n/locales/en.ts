@@ -362,6 +362,11 @@ const en = {
     hideRawResponse: "Hide raw response",
   },
   viewer: {
+    documents: "Documents",
+    studentAnswer: "Student answer",
+    teacherAnswer: "Answer key",
+    questionFile: "Question",
+    notUploaded: "File not uploaded yet",
     answerScan: "Answer sheet",
     zoomIn: "Zoom in",
     zoomOut: "Zoom out",
